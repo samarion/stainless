@@ -112,6 +112,10 @@ trait TransformerWithType extends TreeTransformer {
       val lub = widen(leastUpperBound(lhs.getType, rhs.getType))
       t.Equals(transform(lhs, lub), transform(rhs, lub)).copiedFrom(expr)
 
+    case s.ExtEquals(lhs, rhs) =>
+      val lub = widen(leastUpperBound(lhs.getType, rhs.getType))
+      t.ExtEquals(transform(lhs, lub), transform(rhs, lub)).copiedFrom(expr)
+
     case s.FPEquals(lhs, rhs) =>
       // no lub; FPEquals is only defined for floats of the same type (i.e. with the same exponent & significand).
       t.FPEquals(transform(lhs), transform(rhs)).copiedFrom(expr)

@@ -37,6 +37,7 @@ package object termination {
 
     utils.NamedPipeline("SizedADTExtraction", SizedADTExtraction(trees)) `andThen`
     utils.NamedPipeline("InductElimination", InductElimination(trees)) `andThen`
+    utils.NamedPipeline("ExtensionalEqualities", ExtensionalEqualities(trees)) `andThen`
     lowering
   }
 

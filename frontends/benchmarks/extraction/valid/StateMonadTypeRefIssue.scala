@@ -21,6 +21,7 @@ object StateMonad {
         (s:S) => (a,s)
       }
 
+    @stainless.annotation.ghost
     def leftUnit[A,S,B](a: A, f: A => St[B,S])(implicit anyS: S): Unit = {
       (unit(a).flatMap(f) ^=
       St((s:S) => (a:A,s:S)).flatMap(f) ^=

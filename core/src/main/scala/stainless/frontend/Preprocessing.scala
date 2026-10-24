@@ -4,7 +4,7 @@ package stainless
 package frontend
 
 import extraction._
-import xlang.{ trees => xt }
+import xlang.{ trees => xt, GhostEqualities }
 
 import stainless.utils.LibraryFilter
 
@@ -15,6 +15,6 @@ class Preprocessing private(override val s: xt.type, override val t: xt.type)
   def this()(using inox.Context) = this(xt, xt)
 
   override def transform(symbols: s.Symbols): t.Symbols = {
-    Recovery.recover(strictBVCleaner.transform(LibraryFilter.removeLibraryFlag(symbols)))
+    GhostEqualities.transform(Recovery.recover(strictBVCleaner.transform(LibraryFilter.removeLibraryFlag(symbols))))
   }
 }

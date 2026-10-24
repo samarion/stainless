@@ -1,5 +1,6 @@
 import stainless.lang._
 import stainless.proof._
+import stainless.annotation._
 
 object Countable {
   // an instance of Countable[T] gives a injection of T into BigInt
@@ -7,6 +8,8 @@ object Countable {
     def f(t: T): BigInt
     def g(x: BigInt): T
 
+    // Ghost, since functions can only be compared extensionally
+    @ghost
     def gof(t: T) = {
       (??? : Unit)
    }.ensuring(_ => g(f(t)) == t)
@@ -16,6 +19,7 @@ object Countable {
 
   // there is no element of Countable[BigInt => BigInt]
   // since there is no injection of BigInt => BigInt into BigInt
+  @ghost
   def lemma(e: Empty) = {
     val f: (BigInt => BigInt) => BigInt = e.f
     val g: BigInt => (BigInt => BigInt) = e.g

@@ -106,14 +106,15 @@ trait InputUtils {
       if (ctx.reporter.errorCount != 0) {
         throw SanitizationError(ctx.reporter.errorsOrNil)
       }
-    }
 
-    // Check that extracted symbols are well-formed
-    try {
-      syms.ensureWellFormed
-    } catch {
-      case e @ xt.NotWellFormedException(defn, _) =>
-        throw extraction.MalformedStainlessCode(defn, e.getMessage)
+      // Check that extracted symbols are well-formed. Unsanitized symbols can compare values that
+      // can't be compared, which the sanitizer reports more precisely.
+      try {
+        syms.ensureWellFormed
+      } catch {
+        case e @ xt.NotWellFormedException(defn, _) =>
+          throw extraction.MalformedStainlessCode(defn, e.getMessage)
+      }
     }
 
     (units.sortBy(_._1.id.name).toSeq, inox.Program(xt)(syms))

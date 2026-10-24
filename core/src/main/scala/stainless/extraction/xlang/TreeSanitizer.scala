@@ -288,6 +288,15 @@ trait TreeSanitizer { self =>
 
       override def traverse(e: Expr, ctx: GhostContext): Unit = e match {
         case Equals(lhs, rhs) if !ctx.isGhost =>
+          // Comparing with an instance of a class whose fields don't contain functions only tests
+          // the class of the other value and compares these fields, as at runtime
+          def isFunctionFree(e: Expr): Boolean = e match {
+            case ClassConstructor(ct, _) =>
+              ct.tcd.fields.forall(vd => !GhostEqualities.containsFunctions(trees)(vd.getType, withAny = false))
+            case _ => false
+          }
+          val isConstructorTest = isFunctionFree(lhs) || isFunctionFree(rhs)
+
           def rec(tp: Type): Unit = tp match {
             case tp if PEDANTIC && typeOps.isParametricType(tp) =>
               errors += MalformedStainlessCode(e,
@@ -307,6 +316,10 @@ trait TreeSanitizer { self =>
 
             case ft: FunctionType =>
               errors += MalformedStainlessCode(e, "Testing lambdas for equality in non-ghost code is unsound")
+
+            case ct: ClassType if GhostEqualities.containsFunctions(trees)(ct, withAny = false) && !isConstructorTest =>
+              errors += MalformedStainlessCode(e,
+                "Testing classes with function fields for equality in non-ghost code is unsound")
 
             case tp =>
               val TypeOperator(es, _) = tp: @unchecked
