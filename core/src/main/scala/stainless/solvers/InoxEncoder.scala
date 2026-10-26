@@ -20,7 +20,8 @@ class InoxEncoder private(override val t: inox.trees.type)
           .map(encoder.transform))
         .withFunctions(sourceProgram.symbols.functions.values.toSeq
           .map(fd => fd.copy(flags = fd.flags.filter(keepFlag(sourceProgram))))
-          .map(encoder.transform))),
+          .map(encoder.transform)
+          .map(dropParamRefinements))),
     extraFunctions = ArrayTheory.extraFunctions,
     extraSorts = ArrayTheory.extraSorts) {
 
@@ -29,6 +30,54 @@ class InoxEncoder private(override val t: inox.trees.type)
     this(inox.trees)(sourceProgram, context)(
       new TreeEncoder[sourceProgram.type](sourceProgram)(using semantics, context),
       new TreeDecoder[sourceProgram.type](sourceProgram))
+}
+
+/** Removes the conditions that a function's parameter types place on its arguments.
+  *
+  * Stainless checks every call argument against the parameter types with dedicated VCs, so
+  * the refinements in argument positions need not be proven again by the solver. Without them,
+  * Inox assumes the function's return type at every call, whatever the arguments.
+  * Refinements at the top of a parameter type become an assumption on the body, so they still
+  * hold while unfolding the body; nested ones are dropped.
+  */
+private def dropParamRefinements(fd: inox.trees.FunDef): inox.trees.FunDef = {
+  import inox.trees._
+
+  // Erases the refinements of `tpe` that values of this type must satisfy (positive positions).
+  // The domains of function types are left untouched, as they are conditions on the callee.
+  def erase(tpe: Type): Type = tpe match {
+    case RefinementType(vd, _) => erase(vd.tpe)
+    case FunctionType(from, to) => FunctionType(from, erase(to))
+    case PiType(params, to) => PiType(params, erase(to))
+    case _: SigmaType => tpe
+    case NAryType(tps, recons) => recons(tps.map(erase))
+  }
+
+  def topLevel(tpe: Type): Seq[(ValDef, Expr)] = tpe match {
+    case RefinementType(vd, pred) => topLevel(vd.tpe) :+ (vd -> pred)
+    case _ => Seq.empty
+  }
+
+  val erased = fd.params.map(vd => erase(vd.tpe))
+  if (erased == fd.params.map(_.tpe)) fd
+  else {
+    // Parameter types may depend on earlier parameters
+    val (newParams, subst) = (fd.params zip erased).foldLeft((Seq.empty[ValDef], Map.empty[ValDef, Expr])) {
+      case ((params, subst), (vd, tpe)) =>
+        val nvd = vd.copy(tpe = typeOps.replaceFromSymbols(subst, tpe)).copiedFrom(vd)
+        (params :+ nvd, subst + (vd -> nvd.toVariable))
+    }
+    val conds = (fd.params zip newParams).flatMap { (vd, nvd) =>
+      topLevel(vd.tpe).map((v, pred) =>
+        exprOps.replaceFromSymbols(Map(v -> nvd.toVariable), exprOps.replaceFromSymbols(subst, pred)))
+    }
+    val body = exprOps.replaceFromSymbols(subst, fd.fullBody)
+    fd.copy(
+      params = newParams,
+      returnType = typeOps.replaceFromSymbols(subst, fd.returnType),
+      fullBody = (if (conds.isEmpty) body else Assume(andJoin(conds), body).copiedFrom(fd.fullBody))
+    ).copiedFrom(fd)
+  }
 }
 
 private object ArrayTheory {
