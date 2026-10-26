@@ -37,8 +37,8 @@ class InoxEncoder private(override val t: inox.trees.type)
   * Stainless checks every call argument against the parameter types with dedicated VCs, so
   * the refinements in argument positions need not be proven again by the solver. Without them,
   * Inox assumes the function's return type at every call, whatever the arguments.
-  * The body is not given the erased refinements as assumptions: Stainless has already checked
-  * the body under them, and an assumption would stand in the way of counterexample validation.
+  * Refinements at the top of a parameter type become an assumption on the body, so they still
+  * hold while unfolding the body; nested ones are dropped.
   */
 private def dropParamRefinements(fd: inox.trees.FunDef): inox.trees.FunDef = {
   import inox.trees._
@@ -53,6 +53,11 @@ private def dropParamRefinements(fd: inox.trees.FunDef): inox.trees.FunDef = {
     case NAryType(tps, recons) => recons(tps.map(erase))
   }
 
+  def topLevel(tpe: Type): Seq[(ValDef, Expr)] = tpe match {
+    case RefinementType(vd, pred) => topLevel(vd.tpe) :+ (vd -> pred)
+    case _ => Seq.empty
+  }
+
   val erased = fd.params.map(vd => erase(vd.tpe))
   if (erased == fd.params.map(_.tpe)) fd
   else {
@@ -62,10 +67,15 @@ private def dropParamRefinements(fd: inox.trees.FunDef): inox.trees.FunDef = {
         val nvd = vd.copy(tpe = typeOps.replaceFromSymbols(subst, tpe)).copiedFrom(vd)
         (params :+ nvd, subst + (vd -> nvd.toVariable))
     }
+    val conds = (fd.params zip newParams).flatMap { (vd, nvd) =>
+      topLevel(vd.tpe).map((v, pred) =>
+        exprOps.replaceFromSymbols(Map(v -> nvd.toVariable), exprOps.replaceFromSymbols(subst, pred)))
+    }
+    val body = exprOps.replaceFromSymbols(subst, fd.fullBody)
     fd.copy(
       params = newParams,
       returnType = typeOps.replaceFromSymbols(subst, fd.returnType),
-      fullBody = exprOps.replaceFromSymbols(subst, fd.fullBody)
+      fullBody = (if (conds.isEmpty) body else Assume(andJoin(conds), body).copiedFrom(fd.fullBody))
     ).copiedFrom(fd)
   }
 }
@@ -291,8 +301,20 @@ private class TreeDecoder[Prog <: Program](val sourceProgram: Prog)
         transform(base)
       ).copiedFrom(e)
 
+    case s.Variable(id, _, _) if sourceParams contains id =>
+      sourceParams(id).toVariable.copiedFrom(e)
+
     case _ => super.transform(e)
   }
+
+  override def transform(vd: s.ValDef): t.ValDef =
+    sourceParams.get(vd.id).map(_.copiedFrom(vd)).getOrElse(super.transform(vd))
+
+  // The parameters of the source functions, by identifier. Parameters keep their identifier
+  // when `dropParamRefinements` erases their types, so the parameters and variables that models
+  // refer to are given back the types of the source program, under which its evaluator binds them.
+  private lazy val sourceParams: Map[inox.Identifier, t.ValDef] =
+    sourceProgram.symbols.functions.values.flatMap(_.params).map(vd => vd.id -> vd).toMap
 
   override def transform(tpe: s.Type): t.Type = tpe match {
     case s.ADTType(`arrayID`, Seq(base)) =>
