@@ -37,8 +37,8 @@ class InoxEncoder private(override val t: inox.trees.type)
   * Stainless checks every call argument against the parameter types with dedicated VCs, so
   * the refinements in argument positions need not be proven again by the solver. Without them,
   * Inox assumes the function's return type at every call, whatever the arguments.
-  * Refinements at the top of a parameter type become an assumption on the body, so they still
-  * hold while unfolding the body; nested ones are dropped.
+  * The body is not given the erased refinements as assumptions: Stainless has already checked
+  * the body under them, and an assumption would stand in the way of counterexample validation.
   */
 private def dropParamRefinements(fd: inox.trees.FunDef): inox.trees.FunDef = {
   import inox.trees._
@@ -53,11 +53,6 @@ private def dropParamRefinements(fd: inox.trees.FunDef): inox.trees.FunDef = {
     case NAryType(tps, recons) => recons(tps.map(erase))
   }
 
-  def topLevel(tpe: Type): Seq[(ValDef, Expr)] = tpe match {
-    case RefinementType(vd, pred) => topLevel(vd.tpe) :+ (vd -> pred)
-    case _ => Seq.empty
-  }
-
   val erased = fd.params.map(vd => erase(vd.tpe))
   if (erased == fd.params.map(_.tpe)) fd
   else {
@@ -67,15 +62,10 @@ private def dropParamRefinements(fd: inox.trees.FunDef): inox.trees.FunDef = {
         val nvd = vd.copy(tpe = typeOps.replaceFromSymbols(subst, tpe)).copiedFrom(vd)
         (params :+ nvd, subst + (vd -> nvd.toVariable))
     }
-    val conds = (fd.params zip newParams).flatMap { (vd, nvd) =>
-      topLevel(vd.tpe).map((v, pred) =>
-        exprOps.replaceFromSymbols(Map(v -> nvd.toVariable), exprOps.replaceFromSymbols(subst, pred)))
-    }
-    val body = exprOps.replaceFromSymbols(subst, fd.fullBody)
     fd.copy(
       params = newParams,
       returnType = typeOps.replaceFromSymbols(subst, fd.returnType),
-      fullBody = (if (conds.isEmpty) body else Assume(andJoin(conds), body).copiedFrom(fd.fullBody))
+      fullBody = exprOps.replaceFromSymbols(subst, fd.fullBody)
     ).copiedFrom(fd)
   }
 }
