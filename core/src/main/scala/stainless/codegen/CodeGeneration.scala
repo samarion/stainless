@@ -620,6 +620,33 @@ trait CodeGeneration { self: CompilationUnit =>
     }
   }
 
+  /** Unfolds the extensional equality between the values of `v1` and `v2` into expressions that
+    * can be compiled, where comparisons between functions or maps are quantified. Sorts are
+    * unfolded once, and the comparisons of their recursive fields are quantified too, so that the
+    * evaluator of quantifiers unfolds them on the values of these fields. */
+  private def extensionalEquality(v1: Variable, v2: Variable): Expr = {
+    def rec(e1: Expr, e2: Expr, seen: Set[Type]): Expr = e1.getType match {
+      case tpe if admitsEquality(tpe) => Equals(e1, e2)
+      case adt: ADTType if seen(adt) => Forall(Seq(ValDef.fresh("u", UnitType())), ExtEquals(e1, e2))
+      case adt: ADTType =>
+        orJoin(adt.getSort.constructors.map { tcons =>
+          andJoin(IsConstructor(e1, tcons.id) +: IsConstructor(e2, tcons.id) +:
+            tcons.fields.map(vd => rec(ADTSelector(e1, vd.id), ADTSelector(e2, vd.id), seen + adt)))
+        })
+      case TupleType(tps) =>
+        andJoin(tps.indices.map(i => rec(TupleSelect(e1, i + 1), TupleSelect(e2, i + 1), seen)))
+      case FunctionType(from, _) =>
+        val xs = from.map(tp => Variable.fresh("x", tp, true))
+        Forall(xs.map(_.toVal), ExtEquals(Application(e1, xs), Application(e2, xs)))
+      case MapType(from, _) =>
+        val k = Variable.fresh("k", from, true)
+        Forall(Seq(k.toVal), ExtEquals(MapApply(e1, k), MapApply(e2, k)))
+      case tpe => throw CompilationException(s"Unsupported extensional equality on $tpe")
+    }
+
+    rec(v1, v2, Set.empty)
+  }
+
   private[codegen] def mkExpr(e: Expr, ch: CodeHandler, canDelegateToMkBranch: Boolean = true)
                              (using locals: Locals, contractsCtx: ContractsCtx): Unit = e match {
     case v: Variable =>
@@ -1287,6 +1314,15 @@ trait CodeGeneration { self: CompilationUnit =>
       }
 
       ch << InvokeVirtual(MonitorClass, "onForallInvocation", s"(I[I[L$ObjectClass;)Z")
+
+    case ExtEquals(l, r) if admitsEquality(l.getType) =>
+      mkExpr(Equals(l, r).copiedFrom(e), ch)
+
+    // Extensional equality between functions isn't computable, and is checked like a quantifier
+    case ExtEquals(l, r) =>
+      val v1 = Variable.fresh("l", l.getType, true)
+      val v2 = Variable.fresh("r", r.getType, true)
+      mkExpr(Let(v1.toVal, l, Let(v2.toVal, r, extensionalEquality(v1, v2))).copiedFrom(e), ch)
 
     case choose: Choose =>
       val id = registerChoose(choose, locals.params, locals.tparams)

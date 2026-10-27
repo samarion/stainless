@@ -11,6 +11,7 @@
   */
 
 import stainless.lang._
+import stainless.annotation._
 
 object Berardi3 {
   def exists[T](p: T => Boolean) = {
@@ -49,11 +50,10 @@ object Berardi3 {
 
   type Pow[A] = A => Boolean
 
-  def jixx[A,B](i: A => B, j: B => A, x: A) = j(i(x)) == x
 
-  def foralljixx[A,B](i: A => B, j: B => A) = forall((x: A) => jixx(i,j,x))
+  def foralljixx[A,B](i: A => B, j: B => A) = forall((x: A) => j(i(x)) == x)
 
-  def foralljixx2[A,B](r: Retract[A,B], i: A => B, j: B => A) = forall((x: A) => jixx(i,j,x))
+  def foralljixx2[A,B](r: Retract[A,B], i: A => B, j: B => A) = forall((x: A) => j(i(x)) == x)
 
   case class Retract[A,B](i: A => B, j: B => A) {
     require(foralljixx(i,j))
@@ -113,12 +113,14 @@ object Berardi3 {
   val i2: Pow[U] => Pow[U] = l.i2
   val j2: Pow[U] => Pow[U] = l.j2
 
+  // The @ghost is to not have the snippet rejected due to testing for lambda equality
+  @ghost
   def russel() = {
     // the following three assertions are used to prove that
     // { j2(i2(u => !u.u[U]()(u))) } = { u => !u.u[U]()(u) }
     assert(l.instantiate(Retract(x => x, x => x)))
     assert(foralljixx(i2,j2))
-    assert(jixx(i2,j2,(u: U) => !u.u[U]()(u)))
+    assert(j2(i2((u: U) => !u.u[U]()(u))) == ((u: U) => !u.u[U]()(u)))
 
     // there
     assert(r.u[U]()(r) == j2(i2(u => !u.u[U]()(u)))(r)) // by definition

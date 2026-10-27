@@ -745,6 +745,14 @@ class TypeChecker(val program: StainlessProgram, val context: inox.Context, val 
         }
         (BooleanType(), tr1 ++ tr2)
 
+      case ExtEquals(e1, e2) =>
+        val (tpe1, tr1) = inferType(tc, e1)
+        val (tpe2, tr2) = inferType(tc, e2)
+        if (tpe1.getType != tpe2.getType) {
+          reporter.fatalError(e.getPos, s"Comparing elements of different types:\n${e1.asString} of type ${tpe1.asString} and\n${e2.asString} of type ${tpe2.asString}")
+        }
+        (BooleanType(), tr1 ++ tr2)
+
       case FPEquals(e1, e2) =>
         val (tpe1, tr1) = inferType(tc, e1)
         val (tpe2, tr2) = inferType(tc, e2)

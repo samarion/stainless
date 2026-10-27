@@ -38,9 +38,8 @@ object Berardi1 {
 
   type Pow[A] = A => Boolean
 
-  def jixx[A,B](i: A => B, j: B => A, x: A) = j(i(x)) == x
 
-  def foralljixx[A,B](i: A => B, j: B => A) = forall((x: A) => jixx(i,j,x))
+  def foralljixx[A,B](i: A => B, j: B => A) = forall((x: A) => j(i(x)) == x)
 
   case class Retract[A,B](i: A => B, j: B => A) {
     require(foralljixx(i,j))
@@ -80,8 +79,8 @@ object Berardi1 {
     val j2: Pow[U] => Pow[U] = l.j2 // "Quantification does not fit in supported fragment"
     assert(forall((r: Retract[U,U]) => foralljixx(i2,j2))) // "Quantification does not fit in supported fragment"
     assert(foralljixx(i2,j2))
-    assert(forall((x: Pow[U]) => jixx(i2,j2,x)))
-    assert(jixx(i2,j2,(u: U) => !u.u[U]()(u)))
+    assert(forall((x: Pow[U]) => j2(i2(x)) == x))
+    assert(j2(i2((u: U) => !u.u[U]()(u))) == ((u: U) => !u.u[U]()(u)))
     assert(j2(i2(u => !u.u[U]()(u))) == ((u: U) => !u.u[U]()(u)))
     assert(r.u[U]()(r) == j2(i2(u => !u.u[U]()(u)))(r))
     assert(r.u[U]()(r) == !r.u[U]()(r))
