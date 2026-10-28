@@ -34,7 +34,7 @@ object BottomUpMergeSortPrecise {
     }
 
     lazy val tail: LList = {
-      require(this != SNil())
+      require(!this.isInstanceOf[SNil])
       this match {
         case SCons(_, tfun, _) => tfun()
       }
