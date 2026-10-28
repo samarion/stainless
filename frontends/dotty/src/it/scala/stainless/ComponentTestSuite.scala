@@ -56,6 +56,12 @@ trait ComponentTestSuite extends inox.TestSuite with inox.ResourceUtils with Inp
 
   protected def filter(ctx: inox.Context, name: String): FilterStatus = Test
 
+  /** The context to run benchmark `name` in. Benchmarks that compare functions need intensional
+    * function equality (see [[inox.solvers.unrolling.optFunctionEquality]]). */
+  protected def benchmarkContext(ctx: inox.Context, name: String): inox.Context =
+    if (ComponentTestSuite.comparingFunctions(name)) ctx.withOpts(ComponentTestSuite.intensionalEquality)
+    else ctx
+
   def testAll(dir: String, lp: LoadedPrograms, identifierFilter: Identifier => Boolean = _ => true)
              (block: inox.Context ?=> (component.Analysis, inox.Reporter, xt.UnitDef, File) => Unit): Unit = {
     for {
@@ -63,7 +69,8 @@ trait ComponentTestSuite extends inox.TestSuite with inox.ResourceUtils with Inp
       if unit.isMain
       name = unit.id.name
     } {
-      test(s"$dir/$name", ctx => filter(ctx, s"$dir/$name")) { ctx ?=>
+      test(s"$dir/$name", ctx => filter(ctx, s"$dir/$name")) { ctx0 ?=>
+        given ctx: inox.Context = benchmarkContext(ctx0, s"$dir/$name")
         val defs = (unit.allFunctions(using lp.programSymbols).toSet ++ unit.allClasses).filter(identifierFilter)
 
         val deps = defs.flatMap(id => lp.programSymbols.dependencies(id) + id)
@@ -94,6 +101,20 @@ trait ComponentTestSuite extends inox.TestSuite with inox.ResourceUtils with Inp
   }
 }
 object ComponentTestSuite extends inox.ResourceUtils with InputUtils {
+  /** The benchmarks that compare functions, which Inox rejects under its default function equality.
+    * They opt into intensional equality for now. */
+  val comparingFunctions: Set[String] = Set(
+    "verification/valid/Countable",
+    "verification/false-valid/Countable2",
+    "verification/invalid/LambdaEquality2",
+    // the imperative phase compares tuples that contain functions
+    "imperative/valid/While4",
+    // equivalence checking compares higher-order functions
+    "whac-a-fun",
+  )
+
+  val intensionalEquality = inox.solvers.unrolling.optFunctionEquality(inox.solvers.unrolling.FunctionEquality.Intensional)
+
   case class LoadedPrograms(unitsWithFile: Seq[(xt.UnitDef, File)], programSymbols: xt.Symbols)
   case class LoadedProgramsWithResource[R](lp: LoadedPrograms, resource: R)
 
