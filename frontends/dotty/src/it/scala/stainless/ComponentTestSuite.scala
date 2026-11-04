@@ -107,6 +107,9 @@ object ComponentTestSuite extends inox.ResourceUtils with InputUtils {
     "verification/valid/Countable",
     "verification/false-valid/Countable2",
     "verification/invalid/LambdaEquality2",
+    // the paradoxes compare values of type parameters instantiated with functions
+    "verification/unchecked-invalid/Berardi1",
+    "verification/unchecked-invalid/Berardi2",
     // the imperative phase compares tuples that contain functions
     "imperative/valid/While4",
     // equivalence checking compares higher-order functions
