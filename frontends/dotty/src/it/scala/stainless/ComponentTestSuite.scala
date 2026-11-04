@@ -110,6 +110,8 @@ object ComponentTestSuite extends inox.ResourceUtils with InputUtils {
     // the paradoxes compare values of type parameters instantiated with functions
     "verification/unchecked-invalid/Berardi1",
     "verification/unchecked-invalid/Berardi2",
+    "termination/unchecked-invalid/Berardi3",
+    "termination/unchecked-invalid/Berardi4",
     // the imperative phase compares tuples that contain functions
     "imperative/valid/While4",
     // equivalence checking compares higher-order functions
