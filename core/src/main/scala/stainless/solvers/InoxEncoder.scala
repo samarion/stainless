@@ -20,6 +20,9 @@ class InoxEncoder private(override val t: inox.trees.type)
           .map(encoder.transform))
         .withFunctions(sourceProgram.symbols.functions.values.toSeq
           .map(fd => fd.copy(flags = fd.flags.filter(keepFlag(sourceProgram))))
+          // Stainless checks call arguments against parameter types with dedicated VCs, so the
+          // solver needn't (see `TypeOps.eraseParamRefinements`)
+          .map(sourceProgram.symbols.eraseParamRefinements)
           .map(encoder.transform))),
     extraFunctions = ArrayTheory.extraFunctions,
     extraSorts = ArrayTheory.extraSorts) {
@@ -252,8 +255,21 @@ private class TreeDecoder[Prog <: Program](val sourceProgram: Prog)
         transform(base)
       ).copiedFrom(e)
 
+    case s.Variable(id, _, _) if sourceParams contains id =>
+      sourceParams(id).toVariable.copiedFrom(e)
+
     case _ => super.transform(e)
   }
+
+  override def transform(vd: s.ValDef): t.ValDef =
+    sourceParams.get(vd.id).map(_.copiedFrom(vd)).getOrElse(super.transform(vd))
+
+  // The parameters of the source functions, by identifier. Parameters keep their identifier
+  // when `eraseParamRefinements` (in `TypeOps`) erases their types, so the parameters and variables
+  // that models refer to are given back the types of the source program, under which its
+  // evaluator binds them.
+  private lazy val sourceParams: Map[inox.Identifier, t.ValDef] =
+    sourceProgram.symbols.functions.values.flatMap(_.params).map(vd => vd.id -> vd).toMap
 
   override def transform(tpe: s.Type): t.Type = tpe match {
     case s.ADTType(`arrayID`, Seq(base)) =>

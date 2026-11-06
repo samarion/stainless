@@ -78,6 +78,47 @@ trait TypeOps extends inox.ast.TypeOps {
     }
   }
 
+  /** Erases the refinements that values of `tpe` must satisfy, i.e. those in positive positions.
+    *
+    * The domains of function types are conditions on the callee, so they are kept.
+    */
+  def erasePositiveRefinements(tpe: Type): Type = tpe match {
+    case RefinementType(vd, _) => erasePositiveRefinements(vd.tpe)
+    case FunctionType(from, to) => FunctionType(from, erasePositiveRefinements(to)).copiedFrom(tpe)
+    case PiType(params, to) => PiType(params, erasePositiveRefinements(to)).copiedFrom(tpe)
+    case SigmaType(params, to) =>
+      val (newParams, subst) = eraseBinders(params)
+      SigmaType(newParams, erasePositiveRefinements(typeOps.replaceFromSymbols(subst, to))).copiedFrom(tpe)
+    case NAryType(tps, recons) => recons(tps.map(erasePositiveRefinements))
+  }
+
+  /** Erases the positive refinements in the types of `vds`, where each type may refer to the
+    * earlier binders, and returns the new binders with the substitution from the old ones.
+    */
+  private def eraseBinders(vds: Seq[ValDef]): (Seq[ValDef], Map[ValDef, Expr]) =
+    vds.foldLeft((Seq.empty[ValDef], Map.empty[ValDef, Expr])) { case ((vds, subst), vd) =>
+      val tpe = erasePositiveRefinements(typeOps.replaceFromSymbols(subst, vd.tpe))
+      val nvd = if (tpe == vd.tpe) vd else vd.copy(tpe = tpe).copiedFrom(vd)
+      (vds :+ nvd, subst + (vd -> nvd.toVariable))
+    }
+
+  /** Erases the refinements that `fd`'s parameter types place on its arguments.
+    *
+    * Stainless checks every call argument against the parameter types with dedicated VCs, so
+    * the solver need not prove the refinements in argument positions again. Without them, Inox
+    * assumes the function's return type at every call, whatever the arguments. The parameters
+    * keep their identifiers.
+    */
+  def eraseParamRefinements(fd: FunDef): FunDef = {
+    val (newParams, subst) = eraseBinders(fd.params)
+    if (newParams == fd.params) fd
+    else fd.copy(
+      params = newParams,
+      returnType = typeOps.replaceFromSymbols(subst, fd.returnType),
+      fullBody = exprOps.replaceFromSymbols(subst, fd.fullBody)
+    ).copiedFrom(fd)
+  }
+
   def replaceKeepPositions(subst: Map[Variable, Expr], tpe: Type): Type = {
     new ConcreteStainlessSelfTreeTransformer {
       override def transform(expr: Expr): Expr = expr match {
