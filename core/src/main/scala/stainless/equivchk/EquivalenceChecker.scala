@@ -695,7 +695,7 @@ class EquivalenceChecker(override val trees: Trees,
     val withPre = exprOps.reconstructSpecs(pre, Some(body), UnitType())
     val eqLemma1 = eqLemma0.copy(
       fullBody = BodyWithSpecs(withPre).withSpec(post).reconstructed,
-      flags = Seq(Derived(Some(fd1.id)), Annotation("traceInduct", List(StringLiteral(fd1.id.name)))),
+      flags = Seq(Derived(Some(fd1.id)), Annotation("traceInduct", List(StringLiteral.fromUTF16(fd1.id.name)))),
       returnType = UnitType()
     )
     val elim = elimTraceInduct(symbols, eqLemma1)

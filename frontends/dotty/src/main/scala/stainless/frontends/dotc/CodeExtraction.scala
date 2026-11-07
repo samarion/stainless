@@ -1040,7 +1040,7 @@ class CodeExtraction(inoxCtx: inox.Context,
     case ExInt64Literal(i)   => (xt.LiteralPattern(binder, xt.Int64Literal(i)),   dctx)
     case ExBooleanLiteral(b) => (xt.LiteralPattern(binder, xt.BooleanLiteral(b)), dctx)
     case ExUnitLiteral()     => (xt.LiteralPattern(binder, xt.UnitLiteral()),     dctx)
-    case ExStringLiteral(s)  => (xt.LiteralPattern(binder, xt.StringLiteral(s)),  dctx)
+    case ExStringLiteral(s)  => (xt.LiteralPattern(binder, xt.StringLiteral.fromUTF16(s)),  dctx)
 
     case t @ Typed(un@UnApply(f, _, pats), tp) =>
       val subPatTps = resolveUnapplySubPatternsTps(un)
@@ -1724,7 +1724,9 @@ class CodeExtraction(inoxCtx: inox.Context,
     case ExUnitLiteral() => xt.UnitLiteral()
     case ExBooleanLiteral(v) => xt.BooleanLiteral(v)
     case ExCharLiteral(c) => xt.CharLiteral(c)
-    case ExStringLiteral(s) => xt.StringLiteral(s)
+    // Scala strings are sequences of UTF-16 code units, each of which is a character for Inox (whose
+    // strings are restricted to the BMP, see `optStringsBMP` in SolverFactory)
+    case ExStringLiteral(s) => xt.StringLiteral.fromUTF16(s)
 
     case ExEffectivelyLiteral(lit) => extractTree(lit)
 

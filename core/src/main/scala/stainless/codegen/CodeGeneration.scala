@@ -700,8 +700,8 @@ trait CodeGeneration { self: CompilationUnit =>
     case UnitLiteral() =>
       ch << Ldc(1)
 
-    case StringLiteral(v) =>
-      ch << Ldc(v)
+    case s: StringLiteral =>
+      ch << Ldc(s.toJavaString)
 
     case IntegerLiteral(v) =>
       ch << Comment(s"New BigInt(LString;)V")

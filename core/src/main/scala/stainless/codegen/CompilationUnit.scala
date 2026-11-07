@@ -151,8 +151,8 @@ class CompilationUnit(val program: Program, val context: inox.Context)(using val
     case FractionLiteral(n, d) =>
       new runtime.Rational(n.toString, d.toString)
 
-    case StringLiteral(v) =>
-      new java.lang.String(v)
+    case s: StringLiteral =>
+      s.toJavaString
 
     case GenericValue(tp, id) =>
       e
@@ -323,7 +323,7 @@ class CompilationUnit(val program: Program, val context: inox.Context)(using val
       CharLiteral(c.toChar)
 
     case (c: java.lang.String, StringType()) =>
-      StringLiteral(c)
+      StringLiteral.fromUTF16(c)
 
     case (cons: runtime.ADT, adt: ADTType) =>
       val fields = cons.productElements()

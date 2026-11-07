@@ -842,7 +842,7 @@ private class S2IRImpl(override val s: tt.type,
     // Now proceed with the body
     val body: CIR.FunBody =
       if (fa.isManuallyDefined) {
-        val Seq(StringLiteral(code), StringLiteral(headerIncludes0), StringLiteral(cIncludes0)) = fa.extAnnotations(manualDefAnnotation): @unchecked
+        val Seq(code, headerIncludes0, cIncludes0) = fa.extAnnotations(manualDefAnnotation).map { case s: StringLiteral => s.toJavaString }: @unchecked
         val headerIncludes =
           if (headerIncludes0.isEmpty) Nil
           else { headerIncludes0 split ':' }.toSeq
@@ -1079,7 +1079,7 @@ private class S2IRImpl(override val s: tt.type,
     case bv@BVLiteral(false, _, 64) => CIR.Lit(L.UInt64Lit(bv.toBigInt))
 
     case CharLiteral(v) => CIR.Lit(L.CharLit(v))
-    case StringLiteral(v) => CIR.Lit(L.StringLit(v))
+    case s: StringLiteral => CIR.Lit(L.StringLit(s.toJavaString))
 
     case Block(es, last) => CIR.buildBlock((es.filterNot {
       case fi: FunctionInvocation if syms.getFunction(fi.id).flags.contains(Ghost) => true
