@@ -151,8 +151,8 @@ class CompilationUnit(val program: Program, val context: inox.Context)(using val
     case FractionLiteral(n, d) =>
       new runtime.Rational(n.toString, d.toString)
 
-    case s: StringLiteral =>
-      s.toJavaString
+    case StringLiteral(v) =>
+      new java.lang.String(v)
 
     case GenericValue(tp, id) =>
       e
