@@ -29,7 +29,7 @@ sbtn shutdown  # stops the server
 
 Note that the server keeps the environment variables and JVM options (`-D...`, `-J...`) it was
 started with: commands that depend on them, such as `STAINLESS_UPDATE_EXPECTED` or
-`-Dtestsuite-parallelism` below, must be run with `sbt` or after restarting the server.
+`-Dtest-parallelism` below, must be run with `sbt` or after restarting the server.
 
 ---
 
@@ -93,10 +93,36 @@ Example for `stainless.DottyExtractionSuite`
 
 ```bash
 sbt -batch \
-  -Dtestsuite-parallelism=3 \
+  -Dtest-parallelism=3 \
   -Dtestcase-parallelism=5 \
   "stainless-dotty / IntegrationTest / testOnly stainless.DottyExtractionSuite"
 ```
+
+---
+
+### Run the tests in parallel
+
+Three JVM properties control what the tests run in parallel. Without them, nothing runs in parallel.
+
+| Property | What runs in parallel | Scope of the number |
+|---|---|---|
+| `-Dtest-parallelism=N` | Test suites (`VerificationSuite`, `LibrarySuite`, ...) | `N` suites at a time, for the whole sbt run |
+| `-Dtestcase-parallelism=N` | Test cases of a suite (a benchmark file with one configuration) | `N` test cases at a time, in each suite |
+| `-Dparallel=N` | VCs of a Stainless run (a test case) | one pool of `N` threads, shared by the whole JVM |
+
+`-Dtest-parallelism` is handled by sbt (see `build.sbt`), and `-Dtestcase-parallelism` by ScalaTest
+(see `ComponentTestSuite`). `-Dparallel` is read by Stainless itself (see `stainless/package.scala`),
+not by the tests: without it, a Stainless run checks its VCs one after another.
+
+The pool of `-Dparallel` is shared by all the test cases, so it caps the number of VCs checked at a
+time in the whole run. Give it at least as many threads as there are test cases running at once
+(suites × test cases). The CI runs the integration tests with
+`-Dtest-parallelism=4 -Dtestcase-parallelism=5 -Dparallel=20` (see `stainless-ci.sh`).
+
+The CI jobs share one machine, with each other and with its users, so these numbers are moderate on
+purpose. For the same reason, the workflows pass `-XX:ActiveProcessorCount` to the JVM, with 16 or
+the number of processors of the machine if it has fewer: without it, each JVM sizes its GC threads,
+its JIT threads and its default thread pools for all the processors of the machine.
 
 ---
 
@@ -118,7 +144,7 @@ concatenated) must match it. To update these files after an intended change, see
 Several integration tests compare what they obtain with files of `frontends/benchmarks`:
 
 - `GenCSuite`: the golden C files `<Name>.expected.c` and `<Name>.expected.h`, and the `<Name>.check`
-  files with the output of the compiled programs (also checked by `TailRecGenCSuite`);
+  files with the output of the compiled programs;
 - `DottyExtractionSuite`: the `.check` files with the errors reported for the programs of
   `extraction/invalid`;
 - `VerificationSuite`: the `.check` files listing the VCs of the programs of `verification/invalid`
