@@ -40,7 +40,7 @@ class UserFiltering private(override val s: xt.type,
 
     def hasKeepFlag(flags: Seq[xt.Flag]) =
       flags.exists(_.name == "keep") ||
-      keepGroups.exists(g => flags.contains(xt.Annotation("keepFor", Seq(xt.StringLiteral.fromUTF16(g)))))
+      keepGroups.exists(g => flags.contains(xt.Annotation("keepFor", Seq(xt.StringLiteral(g)))))
 
     def keepDefinition(defn: xt.Definition): Boolean =
       hasKeepFlag(defn.flags) || userDependencies.contains(defn.id)

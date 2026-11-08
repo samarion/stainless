@@ -150,7 +150,7 @@ trait Utils {
         case Some(Postcondition(post)) =>
           exprOps.preTraversal {
             case _ if funInv.isDefined => // do nothing
-            case fi@FunctionInvocation(tfd, tps, args) if fi.id != fd.id && symbols.isRecursive(tfd) && (funNames.contains(StringLiteral.fromUTF16(tfd.name)) || funNames.contains(StringLiteral.fromUTF16(""))) =>
+            case fi@FunctionInvocation(tfd, tps, args) if fi.id != fd.id && symbols.isRecursive(tfd) && (funNames.contains(StringLiteral(tfd.name)) || funNames.contains(StringLiteral(""))) =>
               val paramVars = fd.params.map(_.toVariable)
               val argCheck = args.forall(paramVars.contains) && args.toSet.size == args.size
               if (argCheck) funInv = Some(fi)

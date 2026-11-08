@@ -323,7 +323,7 @@ class CompilationUnit(val program: Program, val context: inox.Context)(using val
       CharLiteral(c.toChar)
 
     case (c: java.lang.String, StringType()) =>
-      StringLiteral.fromUTF16(c)
+      StringLiteral(c)
 
     case (cons: runtime.ADT, adt: ADTType) =>
       val fields = cons.productElements()
