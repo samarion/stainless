@@ -3,21 +3,22 @@ import stainless.annotation._
 
 // See https://github.com/epfl-lara/stainless/issues/1180
 object Countable2 {
-  // an instance of Countable[T] gives a bijection between T and BigInt
-  abstract class Countable[T] {
+  // an instance of Countable gives a bijection between BigInt => BigInt and BigInt
+  // (two functions are the same when they agree on all inputs)
+  abstract class Countable {
     @law
     def isBijective = {
-      forall((t: T) => g(f(t)) == t) &&
+      forall((t: BigInt => BigInt, x: BigInt) => g(f(t))(x) == t(x)) &&
       forall((h: BigInt) => f(g(h)) == h)
     }
 
-    def f(x: T): BigInt
-    def g(x: BigInt): T
+    def f(x: BigInt => BigInt): BigInt
+    def g(x: BigInt): BigInt => BigInt
   }
 
-  type Empty = Countable[BigInt => BigInt]
+  type Empty = Countable
 
-  // there is no element of Countable[BigInt => BigInt]
+  // there is no element of Countable
   // (since there is no bijection between BigInt and BigInt => BigInt)
   def lemma(e: Empty) = {
     assert(e.isBijective)
