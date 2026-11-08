@@ -32,19 +32,20 @@ object Berardi2 {
 
   type Pow[A] = A => Boolean
 
-  def jixx[A,B](i: A => B, j: B => A, x: A) = j(i(x)) == x
+  // retracts between sets, which are the same when they have the same elements
+  def jixx[A,B](i: Pow[A] => Pow[B], j: Pow[B] => Pow[A], x: Pow[A], a: A) = j(i(x))(a) == x(a)
 
-  def foralljixx[A,B](i: A => B, j: B => A) = forall((x: A) => jixx(i,j,x))
+  def foralljixx[A,B](i: Pow[A] => Pow[B], j: Pow[B] => Pow[A]) = forall((x: Pow[A], a: A) => jixx(i,j,x,a))
 
-  case class Retract[A,B](i: A => B, j: B => A) {
+  case class Retract[A,B](i: Pow[A] => Pow[B], j: Pow[B] => Pow[A]) {
     require(foralljixx(i,j))
   }
 
-  case class RetractCond[A,B](i2: A => B, j2: B => A) {
+  case class RetractCond[A,B](i2: Pow[A] => Pow[B], j2: Pow[B] => Pow[A]) {
     require(forall((r: Retract[A,B]) => foralljixx(i2,j2)))
   }
 
-  def l1[A,B](): RetractCond[Pow[A],Pow[B]] = cem[Retract[Pow[A],Pow[B]]] match {
+  def l1[A,B](): RetractCond[A,B] = cem[Retract[A,B]] match {
     case Left(Retract(i,j)) =>
       RetractCond(i,j)
     case Right(nr) =>
@@ -65,8 +66,6 @@ object Berardi2 {
     }
   }
 
-  // The @ghost is to not have the snippet rejected due to testing for lambda equality
-  @ghost
   def russel() = {
     val r = R()
     val l = l1[U,U]()
@@ -74,9 +73,9 @@ object Berardi2 {
     val j2: Pow[U] => Pow[U] = l.j2
     assert(forall((r: Retract[U,U]) => foralljixx(i2,j2))) // "Quantification does not fit in supported fragment"
     assert(foralljixx(i2,j2)) // "Quantification does not fit in supported fragment"
-    assert(forall((x: Pow[U]) => jixx(i2,j2,x)))
-    assert(jixx(i2,j2,(u: U) => !u.u[U]()(u)))
-    assert(j2(i2(u => !u.u[U]()(u))) == ((u: U) => !u.u[U]()(u)))
+    assert(forall((x: Pow[U], a: U) => jixx(i2,j2,x,a)))
+    assert(jixx(i2,j2,(u: U) => !u.u[U]()(u),r))
+    assert(j2(i2(u => !u.u[U]()(u)))(r) == !r.u[U]()(r))
     assert(r.u[U]()(r) == j2(i2(u => !u.u[U]()(u)))(r))
     assert(r.u[U]()(r) == !r.u[U]()(r))
     assert(false)

@@ -19,6 +19,17 @@ class UncheckedSuite extends VerificationComponentTestSuite {
     }
   }
 
+  // CVC4 doesn't give up on the retract queries of these paradoxes before the timeout
+  override def filter(ctx: inox.Context, name: String): FilterStatus = {
+    val solvers = ctx.options.findOptionOrDefault(inox.optSelectedSolvers)
+    if (solvers == Set("smt-cvc4") && slowOnCVC4(name)) Ignore else super.filter(ctx, name)
+  }
+
+  private val slowOnCVC4 = Set(
+    "verification/unchecked-invalid/Berardi1",
+    "verification/unchecked-invalid/Berardi2",
+  )
+
   import UncheckedSuite._
   testUncheckedAll("verification/unchecked-invalid", uncheckedInvalid)
   testUncheckedAll("verification/unchecked-valid", uncheckedValid)

@@ -49,17 +49,18 @@ object Berardi3 {
 
   type Pow[A] = A => Boolean
 
-  def jixx[A,B](i: A => B, j: B => A, x: A) = j(i(x)) == x
+  // retracts between sets, which are the same when they have the same elements
+  def jixx[A,B](i: Pow[A] => Pow[B], j: Pow[B] => Pow[A], x: Pow[A], a: A) = j(i(x))(a) == x(a)
 
-  def foralljixx[A,B](i: A => B, j: B => A) = forall((x: A) => jixx(i,j,x))
+  def foralljixx[A,B](i: Pow[A] => Pow[B], j: Pow[B] => Pow[A]) = forall((x: Pow[A], a: A) => jixx(i,j,x,a))
 
-  def foralljixx2[A,B](r: Retract[A,B], i: A => B, j: B => A) = forall((x: A) => jixx(i,j,x))
+  def foralljixx2[A,B](r: Retract[A,B], i: Pow[A] => Pow[B], j: Pow[B] => Pow[A]) = forall((x: Pow[A], a: A) => jixx(i,j,x,a))
 
-  case class Retract[A,B](i: A => B, j: B => A) {
+  case class Retract[A,B](i: Pow[A] => Pow[B], j: Pow[B] => Pow[A]) {
     require(foralljixx(i,j))
   }
 
-  case class RetractCond[A,B](i2: A => B, j2: B => A) {
+  case class RetractCond[A,B](i2: Pow[A] => Pow[B], j2: Pow[B] => Pow[A]) {
     require(forall((r: Retract[A,B]) => foralljixx(i2,j2)))
 
     def instantiate(r: Retract[A,B]) = {
@@ -69,12 +70,12 @@ object Berardi3 {
     }.holds
   }
 
-  def helper1[A,B](nr: Retract[A,B] => False, r: Retract[A,B], i: A => B, j: B => A) = {
+  def helper1[A,B](nr: Retract[A,B] => False, r: Retract[A,B], i: Pow[A] => Pow[B], j: Pow[B] => Pow[A]) = {
     assert(mkFalse(nr(r)))
     foralljixx(i,j)
   }.holds
 
-  def helper2[A,B](nr: Retract[A,B] => False, i: A => B, j: B => A) = {
+  def helper2[A,B](nr: Retract[A,B] => False, i: Pow[A] => Pow[B], j: Pow[B] => Pow[A]) = {
     assert(forall((r: Retract[A,B]) => {
       helper1(nr,r,i,j) &&
       foralljixx(i,j)
@@ -84,14 +85,14 @@ object Berardi3 {
     })
   }.holds
 
-  def l1[A,B](): RetractCond[Pow[A],Pow[B]] = cem[Retract[Pow[A],Pow[B]]]() match {
+  def l1[A,B](): RetractCond[A,B] = cem[Retract[A,B]]() match {
     case Left(Retract(i,j)) =>
       RetractCond(i,j)
     case Right(nr) =>
       def i[A,B](x: Pow[A]): Pow[B] = (y: B) => false
       def j[A,B](x: Pow[B]): Pow[A] = (y: A) => false
-      assert(helper2[Pow[A],Pow[B]](nr, i, j))
-      RetractCond[Pow[A],Pow[B]](i,j)
+      assert(helper2[A,B](nr, i, j))
+      RetractCond[A,B](i,j)
   }
 
   trait U {
@@ -109,7 +110,7 @@ object Berardi3 {
   }
 
   val r = R()
-  val l: RetractCond[Pow[U],Pow[U]] = l1[U,U]()
+  val l: RetractCond[U,U] = l1[U,U]()
   val i2: Pow[U] => Pow[U] = l.i2
   val j2: Pow[U] => Pow[U] = l.j2
 
@@ -118,7 +119,7 @@ object Berardi3 {
     // { j2(i2(u => !u.u[U]()(u))) } = { u => !u.u[U]()(u) }
     assert(l.instantiate(Retract(x => x, x => x)))
     assert(foralljixx(i2,j2))
-    assert(jixx(i2,j2,(u: U) => !u.u[U]()(u)))
+    assert(jixx(i2,j2,(u: U) => !u.u[U]()(u),r))
 
     // there
     assert(r.u[U]()(r) == j2(i2(u => !u.u[U]()(u)))(r)) // by definition
