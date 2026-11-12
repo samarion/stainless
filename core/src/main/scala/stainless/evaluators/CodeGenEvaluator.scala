@@ -22,17 +22,28 @@ import scala.util.Try
 import scala.jdk.CollectionConverters._
 import scala.collection.mutable.{Map => MutableMap}
 
+/** Evaluates expressions by compiling them to bytecode, along with the program, which `unit`
+  * compiles. The evaluators of a program share its unit (see [[CodeGenEvaluator.apply]]), whatever
+  * their context: model validation creates an evaluator for each solver, and compiling the program
+  * again for each of them took most of codegen's time. */
 class CodeGenEvaluator(override val program: Program,
                        override val context: inox.Context)
+                      (compilationUnit: CompilationUnit)
                       (using override val semantics: program.Semantics)
-  extends CompilationUnit(program, context)
-     with inox.evaluators.DeterministicEvaluator
+  extends inox.evaluators.DeterministicEvaluator
      with ChooseSolving { self =>
+
+  val unit: CompilationUnit { val program: self.program.type } = {
+    require(compilationUnit.program eq program, "The unit compiles another program")
+    compilationUnit.asInstanceOf[CompilationUnit { val program: self.program.type }]
+  }
 
   import context.{given, _}
   import program._
   import program.trees._
   import program.symbols.{given, _}
+  import unit.{CompiledExpression, maxSteps, getType, registerType, getChoose, getUninterpreted, getForall,
+    jvmToValue, valueToJVM, compileExpression}
 
   class Monitor(model: program.Model) extends runtime.Monitor {
     private var calls = 0
@@ -222,11 +233,35 @@ class CodeGenEvaluator(override val program: Program,
 }
 
 object CodeGenEvaluator {
+  /** The program, split into functions that fit in JVM methods, and its bytecode. */
+  private[evaluators] final class Compiled(val source: StainlessProgram, ctx: inox.Context) {
+    val split = FunctionSplitting(source, size = 5000, slots = 100)
+    val unit: CompilationUnit { val program: split.targetProgram.type } =
+      new CompilationUnit(split.targetProgram, ctx)(using split.targetProgram.getSemantics)
+        .asInstanceOf[CompilationUnit { val program: split.targetProgram.type }]
+  }
+
   def apply(p: StainlessProgram, ctx: inox.Context): DeterministicEvaluator { val program: p.type } = {
-    val split = FunctionSplitting(p, size = 5000, slots = 100)
+    // The evaluators of contexts with the same options share the compiled program. The solvers of a
+    // factory have the same options, and only differ in their interrupt managers.
+    val compiled = (p.getSemantics match {
+      case cache: CodeGenCache => cache.compiled(ctx.options)(new Compiled(p, ctx))
+      case _ => new Compiled(p, ctx)
+    }).asInstanceOf[Compiled { val source: p.type }]
+    import compiled.split
+
     class Impl(override val program: split.targetProgram.type)
-      extends CodeGenEvaluator(program, ctx)(using split.targetProgram.getSemantics)
+      extends CodeGenEvaluator(program, ctx)(compiled.unit)(using split.targetProgram.getSemantics)
 
     EncodingEvaluator(p)(split)(new Impl(split.targetProgram))
   }
+}
+
+/** Semantics that keep the programs that [[CodeGenEvaluator]] compiled for their program, by the
+  * options of the context, so that its evaluators share them. */
+trait CodeGenCache { self: inox.Semantics =>
+  private val compiledPrograms = scala.collection.mutable.Map[inox.Options, CodeGenEvaluator.Compiled]()
+
+  private[evaluators] def compiled(options: inox.Options)(compile: => CodeGenEvaluator.Compiled): CodeGenEvaluator.Compiled =
+    synchronized(compiledPrograms.getOrElseUpdate(options, compile))
 }
