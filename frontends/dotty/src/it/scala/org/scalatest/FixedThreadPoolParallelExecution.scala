@@ -12,6 +12,10 @@ trait FixedThreadPoolParallelExecution extends SuiteMixin with ParallelTestExecu
 
   def threadPoolSize: Int
 
+  // Each test runs in an instance of its own, which only needs to register that test
+  override def newInstance =
+    inox.TestSuite.deferringRegistration(super.newInstance)
+
   abstract override def run(testName: Option[String], args: Args): Status =
     super.run(testName, args.copy(
       distributor = Some(
