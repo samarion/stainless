@@ -73,10 +73,18 @@ class MeasureInference(override val s: Trees, override val t: Trees)(using overr
       }
     }
 
-    def needsMeasure(fd: FunDef): Boolean = symbols.isRecursive(fd.id) && {
-      val specced = exprOps.BodyWithSpecs(fd.fullBody)
-      !specced.specs.exists(_.kind == exprOps.MeasureKind)
-    }
+    private def hasMeasure(fd: FunDef): Boolean =
+      exprOps.BodyWithSpecs(fd.fullBody).specs.exists(_.kind == exprOps.MeasureKind)
+
+    /** A recursive function needs a measure when it has none. It also does when it has one and is
+      * mutually recursive with a function that has none: the measure that is inferred for the
+      * latter extends the given one, and all the measures of the group must have the same type.
+      */
+    def needsMeasure(fd: FunDef): Boolean = symbols.isRecursive(fd.id) && (!hasMeasure(fd) || {
+      symbols.transitiveCallees(fd.id).exists { id =>
+        id != fd.id && symbols.transitivelyCalls(id, fd.id) && !hasMeasure(symbols.getFunction(id))
+      }
+    })
 
     def getPosts(id: Identifier): Postconditions =
       postconditionCache.getOrElse(id, MutableMap())
