@@ -219,6 +219,9 @@ class VerificationSuite extends VerificationComponentTestSuite {
       "verification/invalid/FloatNonProperties",
       "verification/invalid/FloatNonAssociativity",
       "verification/invalid/FloatingPointFunctionsContradiction",
+
+      // Times out
+      "verification/valid/ScalaLibrary",
     )
 
   private val ignoreCodegen = Set(

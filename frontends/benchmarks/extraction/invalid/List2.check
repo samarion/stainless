@@ -1,3 +1,0 @@
-[ Error  ] List2.scala:4:3: Scala API `scala.collection.immutable.Nil` is not directly supported, please use `stainless.collection.Nil` instead.
-             def foobar = Nil
-             ^^^^^^^^^^^^^^^^

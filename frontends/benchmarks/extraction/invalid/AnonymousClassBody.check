@@ -1,3 +1,3 @@
-[ Error  ] AnonymousClassBody.scala:14:9: Scala API `scala.collection.immutable.List` is not directly supported, please use `stainless.collection.List` instead.
-                   val l: scala.collection.immutable.List[Int] = scala.collection.immutable.List(1, 2)
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[ Error  ] AnonymousClassBody.scala:14:9: Scala API `scala.collection.immutable.Set` is not directly supported, please use `stainless.lang.Set` instead.
+                   val l: scala.collection.immutable.Set[Int] = scala.collection.immutable.Set(1, 2)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
