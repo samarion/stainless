@@ -615,6 +615,9 @@ class FragmentChecker(inoxCtx: inox.Context)(using override val dottyCtx: DottyC
               reportError(nested.sourcePos, "Classes cannot be defined within case objects")
             case nested @ ExClassDef() if !sym.owner.isClass =>
               reportError(nested.sourcePos, "Classes cannot be defined within local classes")
+            case nested @ ExClassDef() if sym `is` Case =>
+              // Case classes compare structurally, while outer instances are compared by reference
+              reportError(nested.sourcePos, "Classes cannot be defined within case classes")
             case nested @ ExClassDef() if nested.symbol `is` ModuleClass =>
               reportError(nested.sourcePos, "Objects cannot be defined within classes or traits")
             case nested @ ExObjectDef() if !(nested.symbol `is` Synthetic) =>

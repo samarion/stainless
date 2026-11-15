@@ -26,6 +26,7 @@ package object extraction {
   val phases: Seq[(String, String)] = Seq(
     "UserFiltering"             -> "Remove all the library functions not used by the user",
     "Preprocessing"             -> "A preprocessing phase before the pipeline",
+    "OuterIdentities"           -> "Draw the identities of new instances of classes with member classes from a ghost allocator",
     "ConstructsUsage"           -> "Collect uses of `choose`, `@extern` and `???` for the summary report",
     "PartialFunctions"          -> "Lift partial function preconditions",
     "XlangLowering"             -> "Lowering phase at the end of xlang phases",

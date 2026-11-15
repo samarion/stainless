@@ -102,6 +102,22 @@ class SymbolMapping {
   private val outerAccessors = MutableMap[Symbol, SymbolIdentifier]()
   private val outerAccessorSymbols = MutableMap[Symbol, stainless.ast.Symbol]()
 
+  private val identityFields = MutableMap[Symbol, SymbolIdentifier]()
+  private val identityAccessors = MutableMap[Symbol, SymbolIdentifier]()
+  private lazy val identityAccessorSymbol = stainless.ast.Symbol("stainless.lang.identity")
+
+  /** Get the identifier of the ghost field holding the identity of instances of [[cls]]. */
+  def fetchIdentityField(cls: Symbol)(using Context): SymbolIdentifier =
+    identityFields.getOrElseUpdate(cls, SymbolIdentifier(ast.Symbol(symFullName(cls) + ".$identity")))
+
+  /** Get the identifier of the accessor of the identity of instances of [[cls]].
+    *
+    * Identity accessors all override each other (a class may inherit them from unrelated traits),
+    * so they share the same symbol.
+    */
+  def fetchIdentityAccessor(cls: Symbol)(using Context): SymbolIdentifier =
+    identityAccessors.getOrElseUpdate(cls, SymbolIdentifier(identityAccessorSymbol))
+
   /** Get the identifier of the field holding the outer instance of the member class [[cls]]. */
   def fetchOuterField(cls: Symbol)(using Context): SymbolIdentifier =
     outerFields.getOrElseUpdate(cls, SymbolIdentifier(ast.Symbol(symFullName(cls) + ".$outer")))

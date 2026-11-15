@@ -695,6 +695,40 @@ class CodeExtraction(inoxCtx: inox.Context,
     def stackedCopies: Seq[tpd.DefDef] = copyDefs
   }
 
+  /** Whether the class `cls` declares member classes, whose instances refer to instances of `cls`. */
+  private def hasMemberClasses(cls: Symbol): Boolean =
+    cls.isClass && !(cls `is` ModuleClass) && !isLibraryClass(cls) &&
+    cls.info.decls.toList.exists(d => d.isClass && isMemberClass(d))
+
+  /** Whether instances of the class `cls` can be outer instances, whose identity matters.
+    *
+    * Scala tests outer instances with reference equality, which differs from structural equality
+    * for instances of (non-object) classes. Such instances get a ghost identity, drawn from a ghost
+    * allocator at construction (see `stainless.extraction.xlang.OuterIdentities`), and outer tests
+    * compare both the outer instances and their identities. All objects share the same identity:
+    * distinct objects are already distinguished by structural equality.
+    */
+  private def hasIdentity(cls: Symbol): Boolean =
+    cls.isClass && cls.asClass.baseClasses.exists(hasMemberClasses)
+
+  /** Whether the class `cls`, which has an identity, declares an identity accessor: concrete classes
+    * implement it, and abstract classes with member classes declare it.
+    */
+  private def declaresIdentity(cls: Symbol): Boolean =
+    !(cls `isOneOf` AbstractOrTrait) || hasMemberClasses(cls)
+
+  /** The identity accessor of instances of the class `cls`, declared by `cls` or by one of its ancestors. */
+  private def identityAccessorId(cls: Symbol): SymbolIdentifier =
+    symbolMapping.fetchIdentityAccessor(cls.asClass.baseClasses.find(declaresIdentity).get)
+
+  /** The identity of `e`, an instance of the class `cls` (which must have an identity). */
+  private def selectIdentity(e: xt.Expr, cls: Symbol)(using pos: SourcePosition): xt.Expr =
+    xt.MethodInvocation(e, identityAccessorId(cls), Seq.empty, Seq.empty).setPos(pos)
+
+  /** The class of the outer instance of the member class `cls`, given by its self type if any. */
+  private def outerClass(cls: Symbol)(using pos: SourcePosition): Symbol =
+    selfTypeClass(cls.owner).getOrElse(cls.owner)
+
   /** The type of the outer instance of the member class `cls`. */
   private def outerClassType(cls: Symbol)(using pos: SourcePosition): xt.ClassType = {
     val owner = cls.owner
@@ -767,20 +801,27 @@ class CodeExtraction(inoxCtx: inox.Context,
       case Some(path) =>
         // The binder is the same for all types `p.C`, so that types with the same path are equal
         val vd = xt.ValDef(outerBinders.getOrElseUpdate(cls, FreshIdentifier("x")), ct).setPos(pos)
-        xt.RefinementType(vd, outerEquals(selectOuter(vd.toVariable, cls), path)).setPos(pos)
+        xt.RefinementType(vd, outerEquals(selectOuter(vd.toVariable, cls), path, outerClass(cls))).setPos(pos)
       case None => ct
     }
 
-  /** The equality of outer instances, a specification (outer classes are typically not sealed) */
-  private def outerEquals(outer: xt.Expr, path: xt.Expr)(using pos: SourcePosition): xt.Expr =
-    xt.Annotated(xt.Equals(outer, path).setPos(pos), Seq(xt.Ghost)).setPos(pos)
+  /** The reference equality of outer instances of class `cls`, a specification (see [[hasIdentity]]). */
+  private def outerEquals(outer: xt.Expr, path: xt.Expr, cls: Symbol)(using pos: SourcePosition): xt.Expr =
+    xt.Annotated(xt.And(
+      xt.Equals(outer, path).setPos(pos),
+      xt.Equals(selectIdentity(outer, cls), selectIdentity(path, cls)).setPos(pos)
+    ).setPos(pos), Seq(xt.Ghost)).setPos(pos)
 
   /** Whether `tpe` is a refinement introduced by [[memberClassType]]. */
   private def isOuterRefinement(tpe: xt.Type): Boolean = tpe match {
-    case xt.RefinementType(vd, xt.Annotated(xt.Equals(xt.MethodInvocation(v: xt.Variable, id, Seq(), Seq()), _), Seq(xt.Ghost))) =>
+    case xt.RefinementType(vd, xt.Annotated(xt.And(xt.Equals(xt.MethodInvocation(v: xt.Variable, id, Seq(), Seq()), _) +: _), Seq(xt.Ghost))) =>
       v.id == vd.id && symbolMapping.isOuterAccessor(id)
     case _ => false
   }
+
+  /** A placeholder for the identity of a new instance, drawn from the ghost allocator by `xlang.OuterIdentities`. */
+  private def freshIdentity(using pos: SourcePosition): xt.Expr =
+    xt.Annotated(xt.NoTree(xt.IntegerType().setPos(pos)).setPos(pos), Seq(xt.Annotation("freshIdentity", Seq.empty))).setPos(pos)
 
   /** The outer instance of the member class `cls`, given by the prefix `p` of `p.C`, as a sub-pattern. */
   private def outerPattern(cls: Symbol, prefix: Type)(using dctx: DefContext, pos: SourcePosition): xt.Pattern = {
@@ -789,7 +830,7 @@ class CodeExtraction(inoxCtx: inox.Context,
         val vd = xt.ValDef.fresh("outer", outerClassType(cls)).setPos(pos)
         xt.RefinementPattern(
           xt.WildcardPattern(None).setPos(pos),
-          xt.Lambda(Seq(vd), outerEquals(vd.toVariable, path)).setPos(pos)
+          xt.Lambda(Seq(vd), outerEquals(vd.toVariable, path, outerClass(cls))).setPos(pos)
         ).setPos(pos)
       case None =>
         outOfSubsetError(pos, s"Stainless cannot determine the outer instance of ${cls.name.show} in this pattern")
@@ -1037,14 +1078,37 @@ class CodeExtraction(inoxCtx: inox.Context,
       case _ => (None, None)
     }
 
-    val allMethods = (methods ++ optInv ++ outerAccessor).map(fd => fd.copy(flags = fd.flags :+ xt.IsMethodOf(id)))
+    // The identity of instances that can be outer instances, see `hasIdentity`
+    val (identityField, identityAccessor) = classType match {
+      case ct: xt.ClassType if hasIdentity(sym) =>
+        given SourcePosition = sym.sourcePos
+        val accId = identityAccessorId(sym)
+        if (sym `is` ModuleClass) {
+          (None, Some(new xt.FunDef(accId, Seq.empty, Seq.empty, xt.IntegerType().setPos(sym.sourcePos),
+            xt.IntegerLiteral(-1).setPos(sym.sourcePos), Seq(xt.Ghost)).setPos(sym.sourcePos)))
+        } else if (isAbstractClass) {
+          if (!declaresIdentity(sym)) (None, None)
+          else (None, Some(new xt.FunDef(accId, Seq.empty, Seq.empty, xt.IntegerType().setPos(sym.sourcePos),
+            xt.NoTree(xt.IntegerType().setPos(sym.sourcePos)).setPos(sym.sourcePos), Seq(xt.IsAbstract, xt.Ghost)).setPos(sym.sourcePos)))
+        } else {
+          val field = xt.ValDef(symbolMapping.fetchIdentityField(sym), xt.IntegerType().setPos(sym.sourcePos), Seq(xt.Ghost)).setPos(sym.sourcePos)
+          (Some(field), Some(new xt.FunDef(accId, Seq.empty, Seq.empty, xt.IntegerType().setPos(sym.sourcePos),
+            xt.ClassSelector(xt.This(ct).setPos(sym.sourcePos), field.id).setPos(sym.sourcePos),
+            Seq(xt.IsAccessor(Some(field.id)), xt.Ghost)).setPos(sym.sourcePos)))
+        }
+      case _: xt.LocalClassType if hasIdentity(sym) =>
+        outOfSubsetError(sym.sourcePos, s"Stainless does not support local or anonymous classes with member classes (${sym.name.show})")
+      case _ => (None, None)
+    }
+
+    val allMethods = (methods ++ optInv ++ outerAccessor ++ identityAccessor).map(fd => fd.copy(flags = fd.flags :+ xt.IsMethodOf(id)))
     val allTypeMembers = typeMembers.map(td => td.copy(flags = td.flags :+ xt.IsTypeMemberOf(id)))
 
     val xcd = new xt.ClassDef(
       id,
       tparams.map(xt.TypeParameterDef(_)),
       parents,
-      outerField.toSeq ++ fields,
+      identityField.toSeq ++ outerField.toSeq ++ fields,
       flags
     ).setPos(sym.sourcePos)
 
@@ -2291,13 +2355,16 @@ class CodeExtraction(inoxCtx: inox.Context,
         case ct: xt.ClassType =>
           val outer = extractPath(typePrefix(tpe)).getOrElse(
             outOfSubsetError(tr, s"Stainless cannot determine the outer instance of ${cls.name.show} in ${tr.show}"))
-          xt.ClassConstructor(ct, outer +: (args map extractTree))
+          val identity = if (hasIdentity(cls) && !(cls `is` ModuleClass)) Seq(freshIdentity) else Seq.empty
+          xt.ClassConstructor(ct, identity ++ (outer +: (args map extractTree)))
         case _ => outOfSubsetError(tr, "Unexpected constructor " + tr.show + "   " + tpe.show)
       }
 
     case ExClassConstruction(tpe, args) =>
       extractType(tpe)(using dctx, tr.sourcePos) match {
       case lct: xt.LocalClassType => xt.LocalClassConstructor(lct, args map extractTree)
+      case ct: xt.ClassType if hasIdentity(tpe.classSymbol) && !(tpe.classSymbol `is` ModuleClass) =>
+        xt.ClassConstructor(ct, freshIdentity(using tr.sourcePos) +: (args map extractTree))
       case ct: xt.ClassType => xt.ClassConstructor(ct, args map extractTree)
       case tt: xt.TupleType => xt.Tuple(args map extractTree)
       case at: xt.ArrayType if args.size == 1 && extractType(args.head.tpe)(using dctx.setResolveTypes(true), tr.sourcePos) == xt.Int32Type() =>
@@ -2326,7 +2393,12 @@ class CodeExtraction(inoxCtx: inox.Context,
       xt.AsInstanceOf(extractTree(t), extractType(tpt))
 
     case TypeApply(s @ Select(t, _), Seq(tpt)) if s.symbol == defn.Any_isInstanceOf =>
-      xt.IsInstanceOf(extractTree(t), extractType(tpt))
+      // Unlike type patterns, `isInstanceOf[p.C]` does not test the outer instance
+      val tpe = extractType(tpt) match {
+        case rt: xt.RefinementType if isOuterRefinement(rt) => rt.vd.tpe
+        case tpe => tpe
+      }
+      xt.IsInstanceOf(extractTree(t), tpe)
 
     case Match(scrut, cases) =>
       xt.MatchExpr(extractTree(scrut), cases.map(cd => extractMatchCase(cd, extractType(scrut))))
