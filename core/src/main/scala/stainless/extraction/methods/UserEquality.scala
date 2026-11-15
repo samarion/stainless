@@ -20,7 +20,8 @@ package methods
  *
  * `x == y` on two identifiers becomes `x.equals(y)`. The method gets the
  * postcondition that it holds when `that` is `this`, so that equality in the logic
- * implies `==`. The converse does not hold in general.
+ * implies `==`. The converse does not hold in general. The method is also pure.
+ * Overrides are held to both, as to any postcondition of the `equals` they override.
  */
 class UserEquality(override val s: Trees, override val t: Trees)
                   (using override val context: inox.Context)
@@ -95,7 +96,11 @@ class UserEquality(override val s: Trees, override val t: Trees)
             t.Lambda(Seq(res), holdsOnThis(res.toVariable)).setPos(fd)
         }
 
-        nfd.copy(fullBody = t.exprOps.withPostcondition(nfd.fullBody, Some(post))).copiedFrom(nfd)
+        // `equals` may not mutate its argument, also when a subclass overrides it
+        nfd.copy(
+          fullBody = t.exprOps.withPostcondition(nfd.fullBody, Some(post)),
+          flags = (nfd.flags :+ t.IsPure).distinct
+        ).copiedFrom(nfd)
       }
     }
   }
