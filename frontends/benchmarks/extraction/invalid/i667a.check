@@ -19,9 +19,3 @@
 [ Error  ] i667a.scala:33:5: Method eq on Object is not supported
                a eq b
                ^^^^^^
-[ Error  ] i667a.scala:39:5: Scala API `scala.collection.immutable.Set` is not directly supported, please use `stainless.lang.Set` instead.
-               val l = scala.collection.immutable.Set(x)
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[ Error  ] i667a.scala:44:5: Scala API `scala.collection.immutable.Set` is not directly supported, please use `stainless.lang.Set` instead.
-               scala.collection.immutable.Set(x).head
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

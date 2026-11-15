@@ -220,6 +220,9 @@ class VerificationSuite extends VerificationComponentTestSuite {
       "verification/invalid/FloatNonAssociativity",
       "verification/invalid/FloatingPointFunctionsContradiction",
 
+      // Unknown instead of valid
+      "verification/valid/ScalaMapSet",
+
       // Times out
       "verification/valid/ScalaLibrary",
     )

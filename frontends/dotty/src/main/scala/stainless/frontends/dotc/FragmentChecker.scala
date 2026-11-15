@@ -393,10 +393,6 @@ class FragmentChecker(inoxCtx: inox.Context)(using override val dottyCtx: DottyC
         ++ getModuleIfDefinedOrNone("stainless.lang.StaticChecks").map(_.info.decl(Names.termName("require")).alternatives.toSet).getOrElse(Set.empty)
 
     private val stainlessReplacement = mutable.Map[Symbol, String](
-      Symbols.requiredClass("scala.collection.Map") -> "stainless.lang.Map",
-      Symbols.requiredClass("scala.collection.immutable.Map") -> "stainless.lang.Map",
-      Symbols.requiredClass("scala.collection.Set") -> "stainless.lang.Set",
-      Symbols.requiredClass("scala.collection.immutable.Set") -> "stainless.lang.Set",
       Symbols.requiredClass("scala.runtime.RichFloat") -> "stainless.lang.WrappedFloat",
       Symbols.requiredClass("scala.runtime.RichDouble") -> "stainless.lang.WrappedDouble",
       Symbols.requiredClass("java.lang.Float") -> "stainless.lang.WrappedFloat",
