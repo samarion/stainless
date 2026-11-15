@@ -67,7 +67,13 @@ class MeasureInference(override val s: Trees, override val t: Trees)(using overr
 
       private def size(v: Variable): Expr = {
         require(v.getType.isInstanceOf[ADTType])
-        val ADTType(id, tps) = v.getType: @unchecked
+        // The type arguments keep their refinements, as the size function must accept `v`
+        def unrefined(tpe: Type): Type = tpe match {
+          case RefinementType(vd, _) => unrefined(vd.tpe)
+          case AnnotatedType(tpe, _) => unrefined(tpe)
+          case _ => tpe
+        }
+        val ADTType(id, tps) = unrefined(v.tpe): @unchecked
         FunctionInvocation(sizes.fullSizeId(symbols.sorts(id)), tps, Seq(v)).setPos(v)
       }
     }

@@ -936,7 +936,13 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
 
       case s.ADTPattern(ob, id, tps, subs) =>
         val sort = s.ADTType(getConstructor(id).sort, tps).copiedFrom(tpe)
-        instanceOfPattern(super.transform(pat, sort), tpe, sort)
+        // The type of the scrutinee has no refinements (see `TransformerWithType`), and
+        // the refinements of the type arguments are checked by the sub-patterns
+        val unrefined = s.typeOps.postMap {
+          case s.RefinementType(vd, _) => Some(vd.tpe)
+          case _ => None
+        } (sort)
+        instanceOfPattern(super.transform(pat, sort), tpe, unrefined)
 
       case s.TuplePattern(None, subs) => tpe match {
         case s.TupleType(tps) if subs.size == tps.size => super.transform(pat, tpe)
