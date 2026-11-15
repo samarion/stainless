@@ -30,6 +30,7 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
     extends utils.ConcurrentCached[T, Identifier](builder)
 
   private val refID = FreshIdentifier("Object")
+  private val refInvariantID = FreshIdentifier("inv")
   private def ref = T(refID)()
 
   private val (int,  intValue)  = (FreshIdentifier("Integer"),   FreshIdentifier("value"))
@@ -1214,7 +1215,7 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
       (tplSizes, funSizes, bvSizes, fpSizes)
     }
 
-    val refSort = new t.ADTSort(refID, Seq(),
+    lazy val refSort = new t.ADTSort(refID, Seq(),
       symbols.classes.values.toSeq.filterNot(_.flags contains s.IsAbstract).map { cd =>
         val anys = cd.typeArgs.map(tp => s.AnyType().copiedFrom(tp))
         val fields = cd.typed(anys).fields.map(emptyScope.transform)
@@ -1244,7 +1245,47 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
         new t.ADTConstructor(map,  refID, Seq(t.ValDef(mapValue,  t.MapType(ref, ref)))),
         new t.ADTConstructor(unit, refID, Seq()),
         new t.ADTConstructor(open, refID, Seq(t.ValDef(openValue, t.IntegerType())))
-      ), Seq(t.Synthetic))
+      ), t.Synthetic +: refInvariant.map(fd => t.HasADTInvariant(fd.id)).toSeq)
+
+    /** The invariant of the reference sort, which holds the invariants of the classes.
+      *
+      * Classes that reach this phase are not encoded as ADT sorts but as constructors of the
+      * reference sort, so their invariants are not sort invariants of their own. Without this
+      * function they would neither be checked when an instance is constructed nor be assumed.
+      */
+    lazy val refInvariant: Option[t.FunDef] = {
+      val invariants = symbols.classes.values.toSeq.filterNot(_.flags contains s.IsAbstract).flatMap { cd =>
+        (cd +: cd.ancestors.map(_.cd)).view.flatMap { acd =>
+          acd.flags.collectFirst { case s.HasADTInvariant(id) => id }
+        }.headOption.map(id => cd -> id)
+      }
+
+      if (invariants.isEmpty) None else Some {
+        mkFunDef(refInvariantID, t.Synthetic, t.InlineInvariant)() { _ =>
+          (Seq("x" :: ref), t.BooleanType(), { case Seq(x) =>
+            given Scope = emptyScope
+            t.andJoin(invariants.map { case (cd, id) =>
+              // The type arguments of the class are unknown here
+              val ct = s.ClassType(cd.id, cd.typeArgs.map(tp => s.AnyType().copiedFrom(tp))).copiedFrom(cd)
+              val acd = (ct.tcd +: ct.tcd.ancestors).find(_.cd.flags contains s.HasADTInvariant(id)).get
+              val FunInfo(fun, tparams) = emptyScope.functions(id)
+              // The type arguments of the invariant are those of its receiver
+              val tpMap = (fun.params.head.getType match {
+                case s.ClassType(_, tps) => (tps zip acd.tps).collect { case (tp: s.TypeParameter, tpe) => tp -> tpe }
+                case _ => Seq.empty
+              }).toMap
+              val tps = fun.tparams.map(tpd => tpMap.getOrElse(tpd.tp, s.AnyType().copiedFrom(tpd)))
+              (x `is` cd.id) ==> t.FunctionInvocation(id,
+                tps.zipWithIndex.collect { case (tp, i) if !tparams(i) => emptyScope.transform(tp) },
+                tps.zipWithIndex.collect { case (tp, i) if tparams(i) =>
+                  simplify(\(("y" :: ref).copiedFrom(tp))(y => instanceOf(y, s.AnyType().copiedFrom(tp), tp)).copiedFrom(tp))
+                } :+ x
+              ).copiedFrom(cd)
+            })
+          })
+        }
+      }
+    }
 
     def transform(fd: s.FunDef): t.FunDef = emptyScope.transform(fd)
 
@@ -1253,7 +1294,7 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
     def functions: Seq[t.FunDef] =
       symbols.classes.keys.toSeq.flatMap(id => Seq(classInstance(id)(using this), classUnapply(id)(using this))) ++
       symbols.sorts.keys.flatMap(id => Seq(sortInstance(id)(using this), sortConvert(id)(using this))) ++
-      OptionSort.functions :+ unapplyAny(using this)
+      OptionSort.functions ++ refInvariant :+ unapplyAny(using this)
 
     def sorts: Seq[t.ADTSort] =
       OptionSort.sorts :+ refSort
@@ -1335,7 +1376,7 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
     // newSymbols.ensureWellFormed
 
     val dependencies: Set[Identifier] =
-      (symbols.functions.keySet ++ symbols.sorts.keySet)
+      (symbols.functions.keySet ++ symbols.sorts.keySet ++ context.refInvariant.map(_.id))
         .flatMap(id => newSymbols.dependencies(id) + id)
 
     val independentSymbols = t.NoSymbols

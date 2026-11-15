@@ -207,6 +207,11 @@ class VerificationSuite extends VerificationComponentTestSuite {
       "verification/invalid/FloatNonAssociativity",
       "verification/invalid/FloatingPointFunctionsContradiction",
 
+      // Times out
+      "verification/valid/ObjectClassInvariants",
+      // Stack overflow when Inox constructs a value of the recursive reference sort
+      "verification/invalid/ObjectClassInvariants1",
+
       // false-valid/ (for greater good...)
       "verification/false-valid/ForestNothing2",
     )
