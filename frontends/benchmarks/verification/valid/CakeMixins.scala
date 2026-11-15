@@ -40,11 +40,16 @@ object CakeMixins {
   trait Printing extends Trees {
     override def name: String = "printing " + super.name
   }
+  trait Tracing extends Trees {
+    override def name: String = "tracing " + super.name
+  }
   trait Fixed extends Trees {
     override def name: String = "fixed"
   }
 
   case object ext extends ExtTrees with Printing
+  case object both extends ExtTrees with Printing with Tracing
+  case object swapped extends ExtTrees with Tracing with Printing
   case object fixedFirst extends Fixed with ExtTrees
   case object fixedLast extends ExtTrees with Fixed
 
@@ -55,6 +60,8 @@ object CakeMixins {
     assert(!ext.isBool(ext.Neg(ext.IntLit(2))))
     assert(ext.name == "printing ext")
     assert(name(ext) == "printing ext")
+    assert(name(both) == "tracing printing ext")
+    assert(name(swapped) == "printing tracing ext")
     assert(name(fixedFirst) == "ext")
     assert(name(fixedLast) == "fixed")
   }

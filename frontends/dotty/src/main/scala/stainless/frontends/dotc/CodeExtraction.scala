@@ -582,69 +582,118 @@ class CodeExtraction(inoxCtx: inox.Context,
     else xt.Assume(xt.IsInstanceOf(thiss, tct).setPos(pos), xt.AsInstanceOf(thiss, tct).setPos(pos)).setPos(pos)
   }
 
-  /** Overrides forwarding to the methods that the class `cls` inherits through mixin composition.
-    *
-    * When a class inherits several overrides of a method from unrelated traits, Scala selects the one
-    * that comes first in the linearization of the class. Method dispatch in Stainless only follows the
-    * subclass relation, so we make that choice explicit with an override `def m(..) = super[T].m(..)`.
-    */
-  private def mixinForwarders(cls: ClassSymbol): Seq[tpd.DefDef] =
-    if (cls.parentSyms.size < 2) Seq.empty
-    else {
-      def isLibraryClass(bc: Symbol): Boolean = {
-        val pkg = bc.enclosingPackageClass.fullName.toString
-        pkg == "scala" || pkg.startsWith("scala.") || pkg == "java" || pkg.startsWith("java.")
+  private def isLibraryClass(bc: Symbol): Boolean = {
+    val pkg = bc.enclosingPackageClass.fullName.toString
+    pkg == "scala" || pkg.startsWith("scala.") || pkg == "java" || pkg.startsWith("java.")
+  }
+
+  private def isSuperAccessor(sym: Symbol): Boolean =
+    sym.exists && (sym `is` Method) && sym.name.is(NameKinds.SuperAccessorName)
+
+  private val stackedMethods = MutableMap[Symbol, Boolean]()
+
+  /** Whether the method `sym` of a trait makes super calls, through the super accessors of the trait. */
+  private def isStacked(sym: Symbol): Boolean = (sym.owner `is` Trait) && stackedMethods.getOrElseUpdate(sym, {
+    var res = false
+    val traverser = new tpd.TreeTraverser {
+      override def traverse(tree: tpd.Tree)(using DottyContext): Unit = tree match {
+        case sel: tpd.Select if isSuperAccessor(sel.symbol) => res = true
+        case _ => if (!res) traverseChildren(tree)
       }
+    }
+    traverser.traverse(sym.defTree)
+    res
+  })
+
+  /** Methods that the class `cls` (not a trait) derives from mixin composition.
+    *
+    * Super calls within a trait refer to the method that comes next in the linearization of the class of `this`.
+    * The Scala compiler calls such methods through abstract super accessors of the trait, which each class
+    * mixing in the trait implements. Dispatching on these accessors makes stacked traits mutually recursive
+    * across classes, so that their termination cannot be established. Instead, the class gets its own copy
+    * of each method of a mixed in trait that makes super calls (a "stacked" method), in which super calls are
+    * static calls to the next method in the linearization of the class, or to its copy if it is stacked.
+    *
+    * When a class inherits overrides of a method from unrelated traits, Scala selects the one that comes first
+    * in the linearization of the class. Method dispatch in Stainless only follows the subclass relation, so we
+    * make that choice explicit with an override calling the selected method.
+    */
+  private class Mixins(cls: ClassSymbol) {
+    private val superClass = cls.superClass
+    private val mixins = cls.baseClasses.filter(bc =>
+      (bc `is` Trait) && !isLibraryClass(bc) && !(superClass.exists && superClass.derivesFrom(bc)))
+
+    private val copies = MutableMap[Symbol, TermSymbol]()
+    private var copyDefs = Seq.empty[tpd.DefDef]
+
+    private def copyOf(impl: Symbol): TermSymbol = copies.getOrElse(impl, {
+      val name = termName(s"${impl.owner.name}$$${impl.name}")
+      val csym = newSymbol(cls, name, Method | Private | Final, cls.thisType.memberInfo(impl), coord = impl.span).asTerm
+      copies(impl) = csym
+      val dd = impl.defTree.asInstanceOf[tpd.DefDef]
+      val trt = impl.owner.asClass
+      // Copies of the stacked methods called by this one are created while copying it
+      val copyDef = tpd.DefDef(csym, paramss => {
+        val ttm = new TreeTypeMap(
+          typeMap = _.substThis(trt, cls.thisType),
+          treeMap = {
+            case t: tpd.This if t.symbol == trt => tpd.This(cls)
+            case sel @ Select(qual: tpd.This, _) if qual.symbol == trt && isSuperAccessor(sel.symbol) =>
+              callee(transform.ResolveSuper.rebindSuper(cls, sel.symbol), sel)
+            case t => t
+          },
+          oldOwners = List(impl),
+          newOwners = List(csym),
+          substFrom = dd.paramss.flatten.map(_.symbol),
+          substTo = paramss.flatten.map(_.symbol)
+        )
+        ttm.transform(dd.rhs)
+      }).withSpan(impl.span)
+      copyDefs :+= copyDef
+      csym
+    })
+
+    /** The method `impl` with receiver `this`, selected without dispatch. */
+    private def callee(impl: Symbol, from: tpd.Tree): tpd.Tree = {
+      if (!impl.exists || (impl `is` Deferred))
+        outOfSubsetError(from.sourcePos, s"Stainless cannot resolve the super call to ${from.symbol.name.show} in ${cls.name.show}")
+      if (isStacked(impl)) tpd.TreeOps(tpd.This(cls)).select(copyOf(impl))
+      else tpd.TreeOps(tpd.Super(tpd.This(cls), impl.owner.name.asTypeName, impl.owner)).select(impl)
+    }
+
+    private def call(fsym: TermSymbol, impl: Symbol): tpd.DefDef =
+      tpd.DefDef(fsym, paramss => paramss.foldLeft(callee(impl, tpd.ref(fsym))) { (fn, ps) =>
+        if (ps.nonEmpty && ps.head.isType) tpd.TreeOps(fn).appliedToTypeTrees(ps)
+        else tpd.TreeOps(fn).appliedToArgs(ps)
+      }).withSpan(cls.span)
+
+    /** Overrides selecting the method that comes first in the linearization. */
+    val forwarders: Seq[tpd.DefDef] = {
       val winners = for {
-        bc <- cls.baseClasses.tail if !isLibraryClass(bc)
+        bc <- cls.baseClasses.tail if !isLibraryClass(bc) && cls.parentSyms.size >= 2
         d <- bc.info.decls.toList
         if (d `is` Method) && !d.isConstructor && !(d `isOneOf` (Deferred | Private | Accessor | Synthetic))
         w = d.matchingMember(cls.thisType)
         if w.exists && w != d && w.owner != cls && !(w `is` Deferred) && !w.owner.derivesFrom(d.owner)
       } yield w
-
       winners.distinct.map { w =>
-        val fsym = newSymbol(cls, w.name, Method | Override, cls.thisType.memberInfo(w), coord = cls.span).asTerm
-        tpd.DefDef(fsym, paramss => {
-          val sel = tpd.TreeOps(tpd.Super(tpd.This(cls), w.owner.name.asTypeName, w.owner)).select(w)
-          paramss.foldLeft(sel: tpd.Tree) { (fn, ps) =>
-            if (ps.nonEmpty && ps.head.isType) tpd.TreeOps(fn).appliedToTypeTrees(ps)
-            else tpd.TreeOps(fn).appliedToArgs(ps)
-          }
-        }).withSpan(cls.span)
+        call(newSymbol(cls, w.name, Method | Override, cls.thisType.memberInfo(w), coord = cls.span).asTerm, w)
       }
     }
 
-  /** Implementations of the super accessors of the traits that the class `cls` mixes in.
-    *
-    * A super call within a trait refers to the method that comes next in the linearization of the class
-    * of `this`. The Scala compiler calls such methods through abstract super accessors of the trait,
-    * which it implements in each class that mixes in the trait. We provide these implementations,
-    * paired with the accessor they implement.
-    */
-  private def superAccessorDefs(cls: ClassSymbol): Seq[(tpd.DefDef, Symbol)] =
-    if (cls `is` Trait) Seq.empty
-    else {
-      val superClass = cls.superClass
-      val mixins = cls.baseClasses.filter(bc => (bc `is` Trait) && !(superClass.exists && superClass.derivesFrom(bc)))
+    /** Implementations of the super accessors of mixed in traits, paired with the accessor they implement. */
+    val superAccessors: Seq[(tpd.DefDef, Symbol)] =
       for {
         trt <- mixins
-        acc <- trt.info.decls.toList if acc.name.is(NameKinds.SuperAccessorName)
+        acc <- trt.info.decls.toList if isSuperAccessor(acc)
       } yield {
-        val impl = transform.ResolveSuper.rebindSuper(cls, acc)
-        if (!impl.exists || (impl `is` Deferred))
-          outOfSubsetError(cls.sourcePos, s"Stainless cannot resolve the super call in ${trt.name.show} through ${acc.name.show}")
         val fsym = newSymbol(cls, acc.name, Method | Override, cls.thisType.memberInfo(acc), coord = cls.span).asTerm
-        val dd = tpd.DefDef(fsym, paramss => {
-          val sel = tpd.TreeOps(tpd.Super(tpd.This(cls), impl.owner.name.asTypeName, impl.owner)).select(impl)
-          paramss.foldLeft(sel: tpd.Tree) { (fn, ps) =>
-            if (ps.nonEmpty && ps.head.isType) tpd.TreeOps(fn).appliedToTypeTrees(ps)
-            else tpd.TreeOps(fn).appliedToArgs(ps)
-          }
-        }).withSpan(cls.span)
-        (dd, acc)
+        (call(fsym, transform.ResolveSuper.rebindSuper(cls, acc)), acc)
       }
-    }
+
+    /** The copies of stacked methods, complete once the other definitions are computed. */
+    def stackedCopies: Seq[tpd.DefDef] = copyDefs
+  }
 
   /** The type of the outer instance of the member class `cls`. */
   private def outerClassType(cls: Symbol)(using pos: SourcePosition): xt.ClassType = {
@@ -932,17 +981,22 @@ class CodeExtraction(inoxCtx: inox.Context,
         reporter.warning(other.sourcePos, s"In class $id, Stainless does not support:\n$other")
     }
 
-    // Methods inherited through mixin composition, see `mixinForwarders`
-    for (dd <- mixinForwarders(sym)) dd match {
-      case ExFunctionDef(fsym, tparams, vparams, _, rhs) =>
-        methods :+= extractFunction(fsym, dd, tparams, vparams, rhs)(using tpCtx)
-    }
-
-    // Super accessors of the traits mixed in, see `superAccessorDefs`
-    for ((dd, acc) <- superAccessorDefs(sym)) dd match {
-      case ExFunctionDef(fsym, tparams, vparams, _, rhs) =>
-        val fd = extractFunction(fsym, dd, tparams, vparams, rhs)(using tpCtx)
-        methods :+= fd.copy(id = SymbolIdentifier(getIdentifier(acc).symbol))
+    // Methods derived from mixin composition, see `Mixins`
+    if (!(sym `is` Trait) && !isLocal) {
+      val mixins = new Mixins(sym)
+      for (dd <- mixins.forwarders) dd match {
+        case ExFunctionDef(fsym, tparams, vparams, _, rhs) =>
+          methods :+= extractFunction(fsym, dd, tparams, vparams, rhs)(using tpCtx)
+      }
+      for ((dd, acc) <- mixins.superAccessors) dd match {
+        case ExFunctionDef(fsym, tparams, vparams, _, rhs) =>
+          val fd = extractFunction(fsym, dd, tparams, vparams, rhs)(using tpCtx)
+          methods :+= fd.copy(id = SymbolIdentifier(getIdentifier(acc).symbol))
+      }
+      for (dd <- mixins.stackedCopies) dd match {
+        case ExFunctionDef(fsym, tparams, vparams, _, rhs) =>
+          methods :+= extractFunction(fsym, dd, tparams, vparams, rhs)(using tpCtx)
+      }
     }
 
     val optInv = if (invariants.isEmpty) None else Some({
