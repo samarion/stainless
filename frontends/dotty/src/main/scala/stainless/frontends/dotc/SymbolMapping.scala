@@ -97,6 +97,32 @@ class SymbolMapping {
       })
   }
 
+  /** Mapping for outer references of member classes: class symbol -> identifier. */
+  private val outerFields = MutableMap[Symbol, SymbolIdentifier]()
+  private val outerAccessors = MutableMap[Symbol, SymbolIdentifier]()
+  private val outerAccessorSymbols = MutableMap[Symbol, stainless.ast.Symbol]()
+
+  /** Get the identifier of the field holding the outer instance of the member class [[cls]]. */
+  def fetchOuterField(cls: Symbol)(using Context): SymbolIdentifier =
+    outerFields.getOrElseUpdate(cls, SymbolIdentifier(ast.Symbol(symFullName(cls) + ".$outer")))
+
+  /** Get the identifier of the accessor of the outer instance of the member class [[cls]].
+    *
+    * The accessors of all member classes sharing the same topmost member class ancestor [[root]]
+    * override each other, so they share the symbol of the accessor of [[root]].
+    */
+  def fetchOuterAccessor(cls: Symbol, root: Symbol)(using Context): SymbolIdentifier =
+    outerAccessors.getOrElseUpdate(cls, {
+      val symbol = outerAccessorSymbols.getOrElseUpdate(root, ast.Symbol(symFullName(root) + ".outer"))
+      SymbolIdentifier(symbol)
+    })
+
+  /** Whether [[id]] identifies the accessor of the outer instance of a member class. */
+  def isOuterAccessor(id: stainless.Identifier): Boolean = id match {
+    case sid: SymbolIdentifier => outerAccessorSymbols.valuesIterator.contains(sid.symbol)
+    case _ => false
+  }
+
   /** Get the identifier for the class invariant of [[sym]]. */
   def fetchInvIdForClass(sym: Symbol)(implicit ctx: Context): SymbolIdentifier = {
     val id = fetch(sym, Plain)
