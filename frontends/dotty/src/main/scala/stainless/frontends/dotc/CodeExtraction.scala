@@ -553,12 +553,105 @@ class CodeExtraction(inoxCtx: inox.Context,
   private def outerFieldId(cls: Symbol): SymbolIdentifier =
     symbolMapping.fetchOuterField(cls)
 
+  /** The class given as self type of the class `cls`, if it is a strict subclass of `cls`.
+    *
+    * Within `cls`, `this` is an instance of its self type: the Scala compiler ensures that every
+    * concrete subclass of `cls` conforms to it. Self types are encoded by casting `this` to the self type,
+    * under the assumption that it is an instance of it.
+    */
+  private def selfTypeClass(cls: Symbol)(using pos: SourcePosition): Option[Symbol] =
+    if (!cls.isClass || (cls `is` ModuleClass)) None
+    else cls.asClass.givenSelfType match {
+      case NoType => None
+      case st =>
+        st.widenDealias.classSymbols.filterNot(c => cls.derivesFrom(c)) match {
+          case Seq() => None
+          case Seq(self) if self.derivesFrom(cls) && self.typeParams.isEmpty && cls.typeParams.isEmpty => Some(self)
+          case _ => outOfSubsetError(pos, s"Stainless only supports self types that are a subclass of the class (${st.show} in ${cls.name.show})")
+        }
+    }
+
+  /** The type of `this` within the class `cls` of type `ct`, taking self types into account. */
+  private def thisClassType(cls: Symbol, ct: xt.ClassType)(using pos: SourcePosition): xt.ClassType =
+    selfTypeClass(cls).map(self => xt.ClassType(getIdentifier(self), Seq.empty).setPos(pos)).getOrElse(ct)
+
+  /** `this` within the class `cls`, cast to the self type of `cls` if any. */
+  private def selfThis(cls: Symbol, thiss: xt.Expr, ct: xt.ClassType)(using pos: SourcePosition): xt.Expr = {
+    val tct = thisClassType(cls, ct)
+    if (tct == ct) thiss
+    else xt.Assume(xt.IsInstanceOf(thiss, tct).setPos(pos), xt.AsInstanceOf(thiss, tct).setPos(pos)).setPos(pos)
+  }
+
+  /** Overrides forwarding to the methods that the class `cls` inherits through mixin composition.
+    *
+    * When a class inherits several overrides of a method from unrelated traits, Scala selects the one
+    * that comes first in the linearization of the class. Method dispatch in Stainless only follows the
+    * subclass relation, so we make that choice explicit with an override `def m(..) = super[T].m(..)`.
+    */
+  private def mixinForwarders(cls: ClassSymbol): Seq[tpd.DefDef] =
+    if (cls.parentSyms.size < 2) Seq.empty
+    else {
+      def isLibraryClass(bc: Symbol): Boolean = {
+        val pkg = bc.enclosingPackageClass.fullName.toString
+        pkg == "scala" || pkg.startsWith("scala.") || pkg == "java" || pkg.startsWith("java.")
+      }
+      val winners = for {
+        bc <- cls.baseClasses.tail if !isLibraryClass(bc)
+        d <- bc.info.decls.toList
+        if (d `is` Method) && !d.isConstructor && !(d `isOneOf` (Deferred | Private | Accessor | Synthetic))
+        w = d.matchingMember(cls.thisType)
+        if w.exists && w != d && w.owner != cls && !(w `is` Deferred) && !w.owner.derivesFrom(d.owner)
+      } yield w
+
+      winners.distinct.map { w =>
+        val fsym = newSymbol(cls, w.name, Method | Override, cls.thisType.memberInfo(w), coord = cls.span).asTerm
+        tpd.DefDef(fsym, paramss => {
+          val sel = tpd.TreeOps(tpd.Super(tpd.This(cls), w.owner.name.asTypeName, w.owner)).select(w)
+          paramss.foldLeft(sel: tpd.Tree) { (fn, ps) =>
+            if (ps.nonEmpty && ps.head.isType) tpd.TreeOps(fn).appliedToTypeTrees(ps)
+            else tpd.TreeOps(fn).appliedToArgs(ps)
+          }
+        }).withSpan(cls.span)
+      }
+    }
+
+  /** Implementations of the super accessors of the traits that the class `cls` mixes in.
+    *
+    * A super call within a trait refers to the method that comes next in the linearization of the class
+    * of `this`. The Scala compiler calls such methods through abstract super accessors of the trait,
+    * which it implements in each class that mixes in the trait. We provide these implementations,
+    * paired with the accessor they implement.
+    */
+  private def superAccessorDefs(cls: ClassSymbol): Seq[(tpd.DefDef, Symbol)] =
+    if (cls `is` Trait) Seq.empty
+    else {
+      val superClass = cls.superClass
+      val mixins = cls.baseClasses.filter(bc => (bc `is` Trait) && !(superClass.exists && superClass.derivesFrom(bc)))
+      for {
+        trt <- mixins
+        acc <- trt.info.decls.toList if acc.name.is(NameKinds.SuperAccessorName)
+      } yield {
+        val impl = transform.ResolveSuper.rebindSuper(cls, acc)
+        if (!impl.exists || (impl `is` Deferred))
+          outOfSubsetError(cls.sourcePos, s"Stainless cannot resolve the super call in ${trt.name.show} through ${acc.name.show}")
+        val fsym = newSymbol(cls, acc.name, Method | Override, cls.thisType.memberInfo(acc), coord = cls.span).asTerm
+        val dd = tpd.DefDef(fsym, paramss => {
+          val sel = tpd.TreeOps(tpd.Super(tpd.This(cls), impl.owner.name.asTypeName, impl.owner)).select(impl)
+          paramss.foldLeft(sel: tpd.Tree) { (fn, ps) =>
+            if (ps.nonEmpty && ps.head.isType) tpd.TreeOps(fn).appliedToTypeTrees(ps)
+            else tpd.TreeOps(fn).appliedToArgs(ps)
+          }
+        }).withSpan(cls.span)
+        (dd, acc)
+      }
+    }
+
   /** The type of the outer instance of the member class `cls`. */
   private def outerClassType(cls: Symbol)(using pos: SourcePosition): xt.ClassType = {
     val owner = cls.owner
     if (owner.typeParams.nonEmpty)
       outOfSubsetError(pos, s"Stainless does not support classes nested in classes with type parameters (${cls.name.show} in ${owner.name.show})")
-    xt.ClassType(getIdentifier(owner), Seq.empty).setPos(pos)
+    thisClassType(owner, xt.ClassType(getIdentifier(owner), Seq.empty).setPos(pos))
   }
 
   /** The outer instance of `e`, an instance of the member class `cls`. */
@@ -572,6 +665,7 @@ class CodeExtraction(inoxCtx: inox.Context,
     else {
       val idx = outers.indexWhere { case (c, _) => c == cls || c.derivesFrom(cls) }
       if (idx < 0) None
+      else if (idx == 0) Some(selfThis(outers.head._1, xt.This(outers.head._2).setPos(pos), outers.head._2))
       else {
         var e: xt.Expr = xt.This(outers.head._2).setPos(pos)
         for (i <- 0 until idx) {
@@ -579,7 +673,8 @@ class CodeExtraction(inoxCtx: inox.Context,
           val (next, nextCt) = outers(i + 1)
           val outer = selectOuter(e, cls)
           // The inherited accessor may have a wider type than the class enclosing `cls`
-          e = if (outerAccessorOwner(cls).owner == next) outer else xt.AsInstanceOf(outer, nextCt).setPos(pos)
+          e = if (outerAccessorOwner(cls).owner == next) outer
+            else xt.AsInstanceOf(outer, thisClassType(next, nextCt)).setPos(pos)
         }
         Some(e)
       }
@@ -835,6 +930,19 @@ class CodeExtraction(inoxCtx: inox.Context,
 
       case other =>
         reporter.warning(other.sourcePos, s"In class $id, Stainless does not support:\n$other")
+    }
+
+    // Methods inherited through mixin composition, see `mixinForwarders`
+    for (dd <- mixinForwarders(sym)) dd match {
+      case ExFunctionDef(fsym, tparams, vparams, _, rhs) =>
+        methods :+= extractFunction(fsym, dd, tparams, vparams, rhs)(using tpCtx)
+    }
+
+    // Super accessors of the traits mixed in, see `superAccessorDefs`
+    for ((dd, acc) <- superAccessorDefs(sym)) dd match {
+      case ExFunctionDef(fsym, tparams, vparams, _, rhs) =>
+        val fd = extractFunction(fsym, dd, tparams, vparams, rhs)(using tpCtx)
+        methods :+= fd.copy(id = SymbolIdentifier(getIdentifier(acc).symbol))
     }
 
     val optInv = if (invariants.isEmpty) None else Some({
@@ -2174,7 +2282,7 @@ class CodeExtraction(inoxCtx: inox.Context,
 
     case t @ This(_) =>
       extractType(t) match {
-        case ct: xt.ClassType => xt.This(ct)
+        case ct: xt.ClassType => selfThis(t.tpe.asInstanceOf[ThisType].cls, xt.This(ct).setPos(t.sourcePos), ct)(using t.sourcePos)
         case lct: xt.LocalClassType => xt.LocalThis(lct)
         case _ => outOfSubsetError(t, "Invalid usage of `this`")
       }
@@ -3204,7 +3312,9 @@ class CodeExtraction(inoxCtx: inox.Context,
         val id = getIdentifier(sym)
         dctx.localClasses.get(id) match {
           case Some(lcd) => Some(xt.LocalThis(extractType(thiss).asInstanceOf[xt.LocalClassType]))
-          case None => Some(xt.This(extractType(thiss).asInstanceOf[xt.ClassType]))
+          case None =>
+            val ct = extractType(thiss).asInstanceOf[xt.ClassType]
+            Some(selfThis(thiss.cls, xt.This(ct).setPos(pos), ct))
         }
       case _: SingletonType =>
         dctx.vars.get(sym).map(e => e())
