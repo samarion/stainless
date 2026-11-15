@@ -1,1 +1,3 @@
-# This test is ignored for all solvers - this is a dummy check file
+7:7;makeEqual;postcondition;valid
+12:5;f;body assertion: Inlined precondition of |:;valid
+13:5;f;body assertion: Inlined precondition of |:;invalid
