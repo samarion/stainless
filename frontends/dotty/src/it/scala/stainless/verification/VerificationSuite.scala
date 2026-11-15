@@ -15,10 +15,6 @@ class VerificationSuite extends VerificationComponentTestSuite {
     "verification/invalid/i1295",
     // unknown/timeout VC but counter-example not found
     "verification/invalid/BadConcRope",
-    // Lemmas used in one equation can leak in other equations due to https://github.com/epfl-lara/inox/issues/139
-    "verification/invalid/Equations1",
-    "verification/invalid/Equations2",
-    "verification/invalid/Equations3",
   )
 
   private val ignoreZ3 = ignoreCommon ++
@@ -181,6 +177,7 @@ class VerificationSuite extends VerificationComponentTestSuite {
       "verification/invalid/i497",
       "verification/invalid/i1295",
       "verification/invalid/i1379c",
+      "verification/invalid/i1395",
       "verification/invalid/InductTacticTest",
       "verification/invalid/InsertionSort",
       "verification/invalid/IntSet",
