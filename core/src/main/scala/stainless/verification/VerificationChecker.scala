@@ -222,8 +222,15 @@ trait VerificationChecker { self =>
   protected def checkAdtInvariantModel(vc: VC, invId: Identifier, model: Model): VCStatus = {
     import inox.evaluators.EvaluationResults._
 
-    val Seq((inv, adt, path)) = collectWithPC(vc.condition) {
+    val (inv, adt, path) = collectWithPC(vc.condition) {
       case (inv @ FunctionInvocation(`invId`, _, Seq(adt: ADT)), path) => (inv, adt, path)
+    } match {
+      case Seq(res) => res
+      case _ =>
+        // The invariant was inlined in the condition (see [[InlineInvariant]]), so the
+        // model can't be validated as below.
+        reporter.debug("- Model not validated: the invariant is inlined.")
+        return VCStatus.Invalid(VCStatus.CounterExample(model))
     }
 
     def success: VCStatus = {
