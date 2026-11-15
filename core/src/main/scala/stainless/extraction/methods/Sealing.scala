@@ -181,6 +181,14 @@ class Sealing(override val s: Trees)(override val t: s.type)
         }
       }
 
+      // The dummy subclass stands for the implementations of `cd` that the program doesn't show,
+      // and its overrides assume the contracts of the methods they override (including laws, see
+      // [[Laws]]). If no implementation can meet these contracts, the dummy subclass must have no
+      // values, so it may be empty for Inox whenever one of its methods has a postcondition.
+      val hasContracts = methods.exists { id =>
+        deconstructSpecs(symbols.getFunction(id).fullBody)._1.exists(_.isInstanceOf[Postcondition])
+      }
+
       // Create a dummy subclass for the current class
       val dummyClass: ClassDef = {
         val varFlag = if (context.isMutable(cd)) Seq(IsVar) else Seq()
@@ -190,7 +198,8 @@ class Sealing(override val s: Trees)(override val t: s.type)
           typeArgs.map(tp => TypeParameterDef(tp).copiedFrom(tp)),
           Seq(ClassType(cd.id, typeArgs).setPos(cd)), // parent is `cd`
           Seq(dummyField) ++ fields, // we add fields for the accessors
-          (cd.flags.filterNot(_ == IsAbstract) :+ Synthetic).distinct
+          ((cd.flags.filterNot(_ == IsAbstract) :+ Synthetic) ++
+            (if (hasContracts) Seq(AllowEmpty(extID(cd.id))) else Seq())).distinct
         ).setPos(cd)
       }
 

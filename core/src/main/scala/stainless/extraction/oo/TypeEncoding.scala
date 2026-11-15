@@ -1244,7 +1244,12 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
         new t.ADTConstructor(map,  refID, Seq(t.ValDef(mapValue,  t.MapType(ref, ref)))),
         new t.ADTConstructor(unit, refID, Seq()),
         new t.ADTConstructor(open, refID, Seq(t.ValDef(openValue, t.IntegerType())))
-      ), Seq(t.Synthetic))
+      ), t.Synthetic +: symbols.classes.values.toSeq.collect {
+        // The constructors that may be empty (see `Sealing`). The constructors of `Object` erase the
+        // type arguments of their classes, so a generic class may be empty at some of them and not
+        // at others: only those without type parameters are flagged.
+        case cd if cd.tparams.isEmpty && cd.flags.exists(_.isInstanceOf[s.AllowEmpty]) => t.AllowEmpty(cd.id)
+      })
 
     def transform(fd: s.FunDef): t.FunDef = emptyScope.transform(fd)
 
@@ -1374,7 +1379,7 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
       .withSorts(independentSymbols.sorts.values.toSeq)
       .withSorts(Seq(new t.ADTSort(refID, Seq(), // overrides refSort in `independentSymbols.sorts`
         context.refSort.constructors.filter(cons => cons.id == open || constructors(cons.id)),
-        context.refSort.flags)
+        context.refSort.flags.filter { case t.AllowEmpty(id) => constructors(id) case _ => true })
       ))
 
     // result.ensureWellFormed

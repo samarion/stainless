@@ -165,7 +165,7 @@ class AdtSpecialization(override val s: Trees, override val t: Trees)
   }
 
   private def keepSortFlag(flag: s.Flag): Boolean = flag match {
-    case s.IsAbstract | s.IsSealed | s.IsCaseObject => false
+    case s.IsAbstract | s.IsSealed | s.IsCaseObject | (_: s.AllowEmpty) => false
     case _ => true
   }
 
@@ -189,7 +189,10 @@ class AdtSpecialization(override val s: Trees, override val t: Trees)
               }
             ).copiedFrom(consCd)
           },
-          cd.flags filter keepSortFlag map (f => context.transform(f))
+          (cd.flags filter keepSortFlag map (f => context.transform(f))) ++
+            // the constructors that may be empty (see `Sealing`)
+            constructors(cd.id).filter(cid => context.symbols.getClass(cid).flags.exists(_.isInstanceOf[s.AllowEmpty]))
+              .map(cid => t.AllowEmpty(constructorID(cid)))
         ).copiedFrom(cd)
 
         val functions = (cd +: cd.descendants).flatMap { cd =>
