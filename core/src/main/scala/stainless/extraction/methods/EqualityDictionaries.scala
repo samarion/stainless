@@ -115,11 +115,19 @@ trait EqualityDictionaries extends ExtractionPipeline {
 
     val functions = symbols.functions.values.toSeq
 
-    // The calls of each function, with the type arguments of the callee
-    val calls: Map[Identifier, Seq[(FunDef, Seq[Type])]] = functions.map { fd =>
-      fd.id -> exprOps.collect[(FunDef, Seq[Type])] {
-        case FunctionInvocation(id, tps, _) => Set(symbols.getFunction(id) -> tps)
-        case MethodInvocation(_, id, tps, _) => Set(symbols.getFunction(id) -> tps)
+    // The instantiations in each function: the type parameters of the functions it calls and
+    // of the classes of the methods it calls, with their type arguments
+    val calls: Map[Identifier, Seq[(Seq[TypeParameter], Seq[Type])]] = functions.map { fd =>
+      fd.id -> exprOps.collect[(Seq[TypeParameter], Seq[Type])] {
+        case FunctionInvocation(id, tps, _) => Set(symbols.getFunction(id).typeArgs -> tps)
+        case MethodInvocation(rec, id, tps, _) =>
+          val callee = symbols.getFunction(id)
+          val cd = symbols.getClass(callee.flags.collectFirst { case IsMethodOf(cid) => cid }.get)
+          val classArgs = rec.getType match {
+            case ct: ClassType => ct.lookupClass.flatMap(tcd => (tcd +: tcd.ancestors).find(_.cd == cd)).map(_.tps)
+            case _ => None
+          }
+          Set((callee.typeArgs ++ cd.typeArgs) -> (tps ++ classArgs.getOrElse(cd.typeArgs)))
         case _ => Set.empty
       } (fd.fullBody).toSeq
     }.toMap
@@ -135,8 +143,8 @@ trait EqualityDictionaries extends ExtractionPipeline {
 
       inox.utils.fixpoint { (demanded: Set[TypeParameter]) =>
         demanded ++ functions.flatMap { fd =>
-          calls(fd.id).flatMap { case (callee, tps) =>
-            (callee.typeArgs zip tps).collect { case (tp, tpe) if demanded(tp) => typeParams(tpe) }.flatten
+          calls(fd.id).flatMap { case (tparams, tps) =>
+            (tparams zip tps).collect { case (tp, tpe) if demanded(tp) => typeParams(tpe) }.flatten
           }
         }
       } (direct)
@@ -150,8 +158,8 @@ trait EqualityDictionaries extends ExtractionPipeline {
     // The demanded type parameters that are instantiated with a type whose `==` is not formal
     val marked: Set[TypeParameter] = inox.utils.fixpoint { (marked: Set[TypeParameter]) =>
       marked ++ functions.flatMap { fd =>
-        calls(fd.id).flatMap { case (callee, tps) =>
-          (callee.typeArgs zip tps).collect { case (tp, tpe) if demanded(tp) && !isFormal(tpe, marked) => tp }
+        calls(fd.id).flatMap { case (tparams, tps) =>
+          (tparams zip tps).collect { case (tp, tpe) if demanded(tp) && !isFormal(tpe, marked) => tp }
         }
       }
     } (Set.empty[TypeParameter])
