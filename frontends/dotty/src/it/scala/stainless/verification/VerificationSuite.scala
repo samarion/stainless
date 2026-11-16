@@ -90,6 +90,8 @@ class VerificationSuite extends VerificationComponentTestSuite {
       "verification/valid/BitsTricksSlow",
       "verification/valid/BooleanOps",
       "verification/valid/BVMaxInterpret",
+      "verification/valid/CakeMixins",
+      "verification/valid/CakeSelfTypes",
       "verification/valid/Composition",
       "verification/valid/ConcRope",
       "verification/valid/ConcTree",
@@ -124,6 +126,7 @@ class VerificationSuite extends VerificationComponentTestSuite {
       "verification/valid/MapDiff",
       "verification/valid/MapGetOrElse2",
       "verification/valid/MapGetPlus",
+      "verification/valid/MemberClasses1", // Princess overflows its stack
       "verification/valid/MergeSort",
       "verification/valid/MergeSort2",
       "verification/valid/Monotonicity",
@@ -191,6 +194,7 @@ class VerificationSuite extends VerificationComponentTestSuite {
       "verification/invalid/LawsExampleInvalid",
       "verification/invalid/ListOperations",
       "verification/invalid/Lists",
+      "verification/invalid/MemberClassesMixing", // Princess overflows its stack
       "verification/invalid/MyTuple3",
       "verification/invalid/Nested15",
       "verification/invalid/Overrides",

@@ -609,14 +609,21 @@ class FragmentChecker(inoxCtx: inox.Context)(using override val dottyCtx: DottyC
           }
 
           val template = cd.rhs.asInstanceOf[tpd.Template]
-          val parents = template.parents.map(_.tpe).filterNot(isIgnored)
-          if (parents.length > 1) {
-            reportError(tree.sourcePos, s"Stainless supports only simple type hierarchies: Classes can only inherit from a single class/trait")
-          }
           traverse(template.constr)
           template.body.foreach {
-            case nested @ ExClassDef() =>
-              reportError(nested.sourcePos, "Classes can only be defined at the top-level, within objects, or within methods")
+            case nested @ ExClassDef() if sym `is` ModuleClass =>
+              reportError(nested.sourcePos, "Classes cannot be defined within case objects")
+            case nested @ ExClassDef() if !sym.owner.isClass =>
+              reportError(nested.sourcePos, "Classes cannot be defined within local classes")
+            case nested @ ExClassDef() if sym `is` Case =>
+              // Case classes compare structurally, while outer instances are compared by reference
+              reportError(nested.sourcePos, "Classes cannot be defined within case classes")
+            case nested @ ExClassDef() if nested.symbol `is` ModuleClass =>
+              reportError(nested.sourcePos, "Objects cannot be defined within classes or traits")
+            case nested @ ExObjectDef() if !(nested.symbol `is` Synthetic) =>
+              reportError(nested.sourcePos, "Objects cannot be defined within classes or traits")
+            case nested @ ExClassDef() if sym.typeParams.nonEmpty =>
+              reportError(nested.sourcePos, "Classes cannot be defined within classes or traits with type parameters")
             case tr => traverse(tr)
           }
 
