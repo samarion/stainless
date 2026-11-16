@@ -977,10 +977,13 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
         // Patterns can't test the refinements of type arguments, which are erased at runtime: the
         // instance check is on the unrefined sort (the type of the scrutinee has no refinements either,
         // see `TransformerWithType`)
-        val unrefined = s.typeOps.postMap {
-          case s.RefinementType(vd, _) => Some(vd.tpe)
+        def unrefine(tp: s.Type): s.Type = s.typeOps.postMap {
+          // the binder's type may itself be refined, e.g. `{ e: Expr with p(e) }` where `Expr` is a sealed
+          // subclass of an open class, and is encoded as `{ e: { v: Tree | v is Expr } | p(e) }`
+          case s.RefinementType(vd, _) => Some(unrefine(vd.tpe))
           case _ => None
-        } (sort)
+        } (tp)
+        val unrefined = unrefine(sort)
         instanceOfPattern(super.transform(pat, sort), tpe, unrefined)
 
       case s.TuplePattern(None, subs) => tpe match {
