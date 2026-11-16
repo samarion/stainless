@@ -40,7 +40,10 @@ sealed abstract class List[T] {
   def contains(v: T): Boolean = (this match {
     case Cons(h, t) => h == v || t.contains(v)
     case Nil() => false
-  }).ensuring { _ == (content.contains(v)) }
+  }).ensuring { res =>
+    (content.contains(v) ==> res) &&
+    (formalEquality[T] ==> (res == content.contains(v)))
+  }
 
   @isabelle.function(term = "List.append")
   def ++(that: List[T]): List[T] = (this match {

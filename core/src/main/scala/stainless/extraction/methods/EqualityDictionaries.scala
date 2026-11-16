@@ -22,13 +22,23 @@ import scala.collection.mutable.{Map => MutableMap}
  * these type parameters take a dictionary, a record of functions
  *
  * {{{
- * case class Eq[A](eqv: (A, A) => Boolean) {
+ * case class Eq[A](eqv: (A, A) => Boolean, formal: Boolean) {
  *   require(forall((x: A) => eqv(x, x)))
  * }
  * }}}
  *
- * and their `==` becomes a call to `eqv`. The other type parameters are left alone, so a
+ * and their `==` becomes `if (eq.formal) x == y else eq.eqv(x, y)`, where `formal` states that
+ * the dictionary is the equality of the logic. The other type parameters are left alone, so a
  * program without `equals` is not changed.
+ *
+ * A method takes the dictionaries of the type parameters of its class that it compares, so
+ * `xs.contains(x)` on a `List[Identifier]` passes the dictionary of `Identifier`. This is not
+ * supported yet for class invariants, fields and overridden methods.
+ *
+ * The library is not verified with the program, and its postconditions were proved for the
+ * equality of the logic. The postcondition of a library function that takes dictionaries
+ * therefore only holds when they are formal, unless it states what it relies on itself with
+ * `formalEquality[T]`, which is the `formal` of the dictionary of `T`.
  *
  * The `==` of a class that doesn't define `equals` is the equality of its fields. When a field
  * has such a type, it is a call to a function that is generated for the class hierarchy:
@@ -54,6 +64,7 @@ trait EqualityDictionaries extends ExtractionPipeline {
   private val eqClass = ast.SymbolIdentifier("stainless.internal.Eq")
   private val eqTparam = TypeParameter.fresh("A")
   private val eqvField = ast.SymbolIdentifier("stainless.internal.Eq.eqv")
+  private val formalField = ast.SymbolIdentifier("stainless.internal.Eq.formal")
   private val eqInvariant = ast.SymbolIdentifier("stainless.internal.Eq.inv")
   private val formalEq = ast.SymbolIdentifier("stainless.internal.formalEq")
   private val formalEqTparam = TypeParameter.fresh("A")
@@ -95,8 +106,29 @@ trait EqualityDictionaries extends ExtractionPipeline {
       case fd if isUserEquals(fd) => fd.flags.collectFirst { case IsMethodOf(cid) => cid }.get -> fd
     }.toMap
 
+    // `formalEquality[T]` states that `==` on `T` is the equality of the logic
+    val formalEquality: Option[Identifier] = symbols.lookup.get[FunDef]("stainless.lang.formalEquality").map(_.id)
+
+    object FormalEquality {
+      def unapply(e: Expr): Option[Type] = e match {
+        case FunctionInvocation(id, Seq(tpe), Seq()) if formalEquality.contains(id) => Some(tpe)
+        case _ => None
+      }
+    }
+
     // A program without `equals` only has the equality of the logic
-    if (equalsMethods.isEmpty) return (symbols, ExtractionSummary.NoSummary)
+    if (equalsMethods.isEmpty) {
+      val functions = symbols.functions.values.toSeq.map { fd =>
+        if (!exprOps.exists { case FormalEquality(_) => true case _ => false } (fd.fullBody)) fd
+        else fd.copy(fullBody = exprOps.postMap {
+          case Implies(FormalEquality(_), rhs) => Some(rhs)
+          case e @ FormalEquality(_) => Some(BooleanLiteral(true).copiedFrom(e))
+          case _ => None
+        } (fd.fullBody)).copiedFrom(fd)
+      }
+
+      return (symbols.withFunctions(functions), ExtractionSummary.NoSummary)
+    }
 
     def equalsOf(cd: ClassDef): Option[FunDef] =
       (cd +: cd.ancestors.map(_.cd)).collectFirst { case c if equalsMethods.contains(c.id) => equalsMethods(c.id) }
@@ -121,19 +153,29 @@ trait EqualityDictionaries extends ExtractionPipeline {
 
     val functions = symbols.functions.values.toSeq
 
+    def classOf(fd: FunDef): Option[ClassDef] =
+      fd.flags.collectFirst { case IsMethodOf(cid) => symbols.getClass(cid) }
+
+    /** The type parameters of the class of a method. */
+    def classTparams(fd: FunDef): Seq[TypeParameter] = classOf(fd).toSeq.flatMap(_.typeArgs)
+
+    /** The type arguments of the class of a method for a receiver. */
+    def classArgs(rec: Expr, callee: FunDef): Seq[Type] = {
+      val cd = classOf(callee).get
+      (rec.getType match {
+        case ct: ClassType => ct.lookupClass.flatMap(tcd => (tcd +: tcd.ancestors).find(_.cd == cd)).map(_.tps)
+        case _ => None
+      }).getOrElse(cd.typeArgs)
+    }
+
     // The instantiations in each function: the type parameters of the functions it calls and
     // of the classes of the methods it calls, with their type arguments
-    val calls: Map[Identifier, Seq[(Seq[TypeParameter], Seq[Type])]] = functions.map { fd =>
-      fd.id -> exprOps.collect[(Seq[TypeParameter], Seq[Type])] {
-        case FunctionInvocation(id, tps, _) => Set(symbols.getFunction(id).typeArgs -> tps)
+    val calls: Map[Identifier, Seq[(Identifier, Seq[TypeParameter], Seq[Type])]] = functions.map { fd =>
+      fd.id -> exprOps.collect[(Identifier, Seq[TypeParameter], Seq[Type])] {
+        case FunctionInvocation(id, tps, _) => Set((id, symbols.getFunction(id).typeArgs, tps))
         case MethodInvocation(rec, id, tps, _) =>
           val callee = symbols.getFunction(id)
-          val cd = symbols.getClass(callee.flags.collectFirst { case IsMethodOf(cid) => cid }.get)
-          val classArgs = rec.getType match {
-            case ct: ClassType => ct.lookupClass.flatMap(tcd => (tcd +: tcd.ancestors).find(_.cd == cd)).map(_.tps)
-            case _ => None
-          }
-          Set((callee.typeArgs ++ cd.typeArgs) -> (tps ++ classArgs.getOrElse(cd.typeArgs)))
+          Set((id, callee.typeArgs ++ classTparams(callee), tps ++ classArgs(rec, callee)))
         case _ => Set.empty
       } (fd.fullBody).toSeq
     }.toMap
@@ -143,13 +185,14 @@ trait EqualityDictionaries extends ExtractionPipeline {
       val direct: Set[TypeParameter] = functions.flatMap { fd =>
         exprOps.collect[TypeParameter] {
           case Equals(lhs, rhs) => typeParams(comparedType(lhs, rhs))
+          case FormalEquality(tpe) => typeParams(tpe)
           case _ => Set.empty
         } (fd.fullBody)
       }.toSet
 
       inox.utils.fixpoint { (demanded: Set[TypeParameter]) =>
         demanded ++ functions.flatMap { fd =>
-          calls(fd.id).flatMap { case (tparams, tps) =>
+          calls(fd.id).flatMap { case (_, tparams, tps) =>
             (tparams zip tps).collect { case (tp, tpe) if demanded(tp) => typeParams(tpe) }.flatten
           }
         }
@@ -164,34 +207,59 @@ trait EqualityDictionaries extends ExtractionPipeline {
     // The demanded type parameters that are instantiated with a type whose `==` is not formal
     val marked: Set[TypeParameter] = inox.utils.fixpoint { (marked: Set[TypeParameter]) =>
       marked ++ functions.flatMap { fd =>
-        calls(fd.id).flatMap { case (tparams, tps) =>
+        calls(fd.id).flatMap { case (_, tparams, tps) =>
           (tparams zip tps).collect { case (tp, tpe) if demanded(tp) && !isFormal(tpe, marked) => tp }
         }
       }
     } (Set.empty[TypeParameter])
 
-    val functionTparams: Set[TypeParameter] = functions.flatMap(_.typeArgs).toSet
-    for (tp <- marked if !functionTparams(tp)) {
-      // The error is reported at a call that instantiates the type parameter with such a type
-      val site: Option[(Expr, Type)] = functions.view.flatMap { fd =>
-        exprOps.collect[(Expr, Type)] {
-          case mi @ MethodInvocation(rec, id, _, _) =>
-            val cd = symbols.getClass(symbols.getFunction(id).flags.collectFirst { case IsMethodOf(cid) => cid }.get)
-            val classArgs = rec.getType match {
-              case ct: ClassType => ct.lookupClass.flatMap(tcd => (tcd +: tcd.ancestors).find(_.cd == cd)).map(_.tps)
-              case _ => None
-            }
-            (cd.typeArgs zip classArgs.getOrElse(cd.typeArgs)).collect {
-              case (`tp`, tpe) if !isFormal(tpe, marked) => (mi: Expr) -> tpe
-            }.toSet
-          case _ => Set.empty
-        } (fd.fullBody).toSeq
-      }.toSeq.sortBy(p => (typeParams(p._2).nonEmpty, p._1.getPos)).headOption
+    // The type parameters of its class that a method takes a dictionary for: those that it
+    // compares, directly or through a call
+    val needed: Map[Identifier, Set[TypeParameter]] = {
+      def ofClass(fd: FunDef, tps: Set[TypeParameter]): Set[TypeParameter] = tps & classTparams(fd).toSet & marked
 
-      val instance = site.map(p => s" (here ${p._2.asString(using PrinterOptions())})").getOrElse("")
-      throw MethodsException(site.map(_._1).getOrElse(tp),
-        s"Equality on the class type parameter ${tp.id.name} is not supported yet " +
-        s"when it is instantiated with a type that defines `equals`$instance")
+      val direct: Map[Identifier, Set[TypeParameter]] = functions.map { fd =>
+        fd.id -> ofClass(fd, exprOps.collect[TypeParameter] {
+          case Equals(lhs, rhs) => typeParams(comparedType(lhs, rhs))
+          case FormalEquality(tpe) => typeParams(tpe)
+          case _ => Set.empty
+        } (fd.fullBody))
+      }.toMap
+
+      inox.utils.fixpoint { (needed: Map[Identifier, Set[TypeParameter]]) =>
+        functions.map { fd =>
+          fd.id -> (needed(fd.id) ++ ofClass(fd, calls(fd.id).flatMap { case (id, tparams, tps) =>
+            val callee = symbols.getFunction(id)
+            (tparams zip tps).collect {
+              case (tp, tpe) if marked(tp) && (callee.typeArgs.contains(tp) || needed(id)(tp)) => typeParams(tpe)
+            }.flatten
+          }.toSet))
+        }.toMap
+      } (direct)
+    }
+
+    /** The type parameters that a function takes a dictionary for. */
+    def dictTparams(fd: FunDef): Seq[TypeParameter] =
+      fd.typeArgs.filter(marked) ++ classTparams(fd).filter(needed(fd.id))
+
+    def instance(tp: TypeParameter): String = functions.flatMap { fd =>
+      calls(fd.id).flatMap { case (_, tparams, tps) =>
+        (tparams zip tps).collect { case (`tp`, tpe) if typeParams(tpe).isEmpty && !isFormal(tpe, marked) => tpe }
+      }
+    }.headOption.map(tpe => s" (as ${tpe.asString(using PrinterOptions())} is)").getOrElse("")
+
+    for (fd <- functions; tp <- needed(fd.id).headOption) {
+      val symbol = fd.id.asInstanceOf[SymbolIdentifier].symbol
+      val family = functions.count(f => f.isMethod && f.id.asInstanceOf[SymbolIdentifier].symbol == symbol)
+      val kind =
+        if (fd.flags.contains(IsInvariant)) Some("a class invariant")
+        else if (fd.flags.exists { case IsAccessor(_) => true case _ => false }) Some("a field")
+        else if (family > 1) Some(s"the method ${fd.id.name}, which is overridden")
+        else None
+
+      for (kind <- kind) throw MethodsException(fd,
+        s"Equality on the class type parameter ${tp.id.name} in $kind is not supported yet " +
+        s"when it is instantiated with a type that defines `equals`${instance(tp)}")
     }
 
     for (fd <- functions if fd.isMethod && fd.typeArgs.exists(marked) &&
@@ -217,7 +285,11 @@ trait EqualityDictionaries extends ExtractionPipeline {
       extends ConcreteOOSelfTreeTransformer(s, s) {
 
       def isFormal(tpe: Type): Boolean = leaves(tpe).forall {
-        case tp: TypeParameter => !dicts.contains(tp)
+        case tp: TypeParameter if dicts.contains(tp) => false
+        case tp: TypeParameter if marked(tp) =>
+          throw MethodsException(tp, s"Equality on the type parameter ${tp.id.name} is not supported here yet " +
+            "when it is instantiated with a type that defines `equals`")
+        case tp: TypeParameter => true
         case _ => false
       }
 
@@ -239,7 +311,10 @@ trait EqualityDictionaries extends ExtractionPipeline {
         changed = true
         tpe match {
           case tp: TypeParameter =>
-            Application(ClassSelector(dicts(tp), eqvField), Seq(lhs, rhs))
+            // A dictionary states whether it is the equality of the logic, which is what the
+            // specifications that relate `==` to sets and maps rely on
+            IfExpr(ClassSelector(dicts(tp), formalField), Equals(lhs, rhs),
+              Application(ClassSelector(dicts(tp), eqvField), Seq(lhs, rhs)))
 
           case ct: ClassType =>
             val tcd = ct.tcd
@@ -285,22 +360,44 @@ trait EqualityDictionaries extends ExtractionPipeline {
               s"${tpe.asString(using PrinterOptions())} is not supported yet")
           }
           val (x, y) = (ValDef.fresh("x", tpe), ValDef.fresh("y", tpe))
-          ClassConstructor(eqType(tpe), Seq(Lambda(Seq(x, y), equality(tpe, x.toVariable, y.toVariable))))
+          ClassConstructor(eqType(tpe), Seq(Lambda(Seq(x, y), equality(tpe, x.toVariable, y.toVariable)), BooleanLiteral(false)))
+      }
+
+      /** Whether the `==` of a type is the equality of the logic. */
+      def formality(tpe: Type): Expr = if (isFormal(tpe)) BooleanLiteral(true) else {
+        changed = true
+        andJoin(leaves(tpe).toSeq.map {
+          case tp: TypeParameter if dicts.contains(tp) => ClassSelector(dicts(tp), formalField)
+          case tp: TypeParameter => BooleanLiteral(true)
+          case _ => BooleanLiteral(false)
+        })
       }
 
       override def transform(e: Expr): Expr = e match {
+        case Implies(FormalEquality(tpe), rhs) if isFormal(tpe) => transform(rhs)
+        case FormalEquality(tpe) => formality(tpe).copiedFrom(e)
+
         case Equals(lhs, rhs) =>
           equality(comparedType(lhs, rhs), transform(lhs), transform(rhs)).copiedFrom(e)
 
-        case FunctionInvocation(id, tps, args) if symbols.getFunction(id).typeArgs.exists(marked) =>
+        case FunctionInvocation(id, tps, args) if dictTparams(symbols.getFunction(id)).nonEmpty =>
+          val callee = symbols.getFunction(id)
+          val tpMap = (callee.typeArgs zip tps).toMap
           FunctionInvocation(id, tps.map(transform), args.map(transform) ++
-            (symbols.getFunction(id).typeArgs zip tps).collect { case (tp, tpe) if marked(tp) => dictionary(tpe) }
+            dictTparams(callee).map(tp => dictionary(tpMap(tp)))
           ).copiedFrom(e)
 
-        case MethodInvocation(rec, id, tps, args) if symbols.getFunction(id).typeArgs.exists(marked) =>
+        case MethodInvocation(rec, id, tps, args) if dictTparams(symbols.getFunction(id)).nonEmpty =>
+          val callee = symbols.getFunction(id)
+          val tpMap = ((callee.typeArgs ++ classTparams(callee)) zip (tps ++ classArgs(rec, callee))).toMap
           MethodInvocation(transform(rec), id, tps.map(transform), args.map(transform) ++
-            (symbols.getFunction(id).typeArgs zip tps).collect { case (tp, tpe) if marked(tp) => dictionary(tpe) }
+            dictTparams(callee).map(tp => dictionary(tpMap(tp)))
           ).copiedFrom(e)
+
+        case ApplyLetRec(_, tparams, _, tps, _)
+        if (tparams zip tps).exists { case (tp, tpe) => demanded(tp) && !isFormal(tpe) } =>
+          throw MethodsException(e, "Equality on a type parameter of an inner function is not supported yet " +
+            "when it is instantiated with a type that defines `equals`")
 
         case _ => super.transform(e)
       }
@@ -374,14 +471,24 @@ trait EqualityDictionaries extends ExtractionPipeline {
     }
 
     val newFunctions = functions.map { fd =>
-      val dictParams = fd.typeArgs.filter(marked).map(tp => ValDef(dictId(tp), eqType(tp)).copiedFrom(fd))
-      val rewriter = new Rewriter((fd.typeArgs.filter(marked) zip dictParams.map(_.toVariable)).toMap, Set.empty)
+      val dictParams = dictTparams(fd).map(tp => ValDef(dictId(tp), eqType(tp)).copiedFrom(fd))
+      val rewriter = new Rewriter((dictTparams(fd) zip dictParams.map(_.toVariable)).toMap, Set.empty)
       // `equals` itself and its postcondition compare `this` and `that` as in the logic
       if (isUserEquals(fd)) fd
-      else fd.copy(
-        params = fd.params ++ dictParams,
-        fullBody = rewriter.transform(fd.fullBody)
-      ).copiedFrom(fd)
+      else {
+        val body = rewriter.transform(fd.fullBody)
+        // The library is not verified with the program, and its postconditions were only proved
+        // for the equality of the logic, unless they say what they rely on with `formalEquality`
+        val guarded = exprOps.postconditionOf(body) match {
+          case Some(post @ Lambda(Seq(res), pred))
+          if fd.flags.contains(Library) && dictParams.nonEmpty &&
+             !exprOps.exists { case FormalEquality(_) => true case _ => false } (fd.fullBody) =>
+            val formal = andJoin(dictParams.map(vd => ClassSelector(vd.toVariable, formalField)))
+            exprOps.withPostcondition(body, Some(Lambda(Seq(res), Implies(formal, pred).copiedFrom(pred)).copiedFrom(post)))
+          case _ => body
+        }
+        fd.copy(params = fd.params ++ dictParams, fullBody = guarded).copiedFrom(fd)
+      }
     }
 
     if (!changed) (symbols, ExtractionSummary.NoSummary) else {
@@ -389,7 +496,7 @@ trait EqualityDictionaries extends ExtractionPipeline {
         eqClass,
         Seq(TypeParameterDef(eqTparam)),
         Seq.empty,
-        Seq(ValDef(eqvField, FunctionType(Seq(eqTparam, eqTparam), BooleanType()))),
+        Seq(ValDef(eqvField, FunctionType(Seq(eqTparam, eqTparam), BooleanType())), ValDef(formalField, BooleanType())),
         Seq(Synthetic)
       )
 
@@ -407,7 +514,7 @@ trait EqualityDictionaries extends ExtractionPipeline {
         val (x, y) = (ValDef.fresh("x", formalEqTparam), ValDef.fresh("y", formalEqTparam))
         new FunDef(
           formalEq, Seq(TypeParameterDef(formalEqTparam)), Seq.empty, eqType(formalEqTparam),
-          ClassConstructor(eqType(formalEqTparam), Seq(Lambda(Seq(x, y), Equals(x.toVariable, y.toVariable)))),
+          ClassConstructor(eqType(formalEqTparam), Seq(Lambda(Seq(x, y), Equals(x.toVariable, y.toVariable)), BooleanLiteral(true))),
           Seq(Synthetic)
         )
       }
