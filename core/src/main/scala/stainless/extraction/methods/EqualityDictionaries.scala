@@ -166,8 +166,26 @@ trait EqualityDictionaries extends ExtractionPipeline {
 
     val functionTparams: Set[TypeParameter] = functions.flatMap(_.typeArgs).toSet
     for (tp <- marked if !functionTparams(tp)) {
-      throw MethodsException(tp, s"Equality on the class type parameter ${tp.id.name} is not supported yet " +
-        "when it is instantiated with a type that defines `equals`")
+      // The error is reported at a call that instantiates the type parameter with such a type
+      val site: Option[(Expr, Type)] = functions.view.flatMap { fd =>
+        exprOps.collect[(Expr, Type)] {
+          case mi @ MethodInvocation(rec, id, _, _) =>
+            val cd = symbols.getClass(symbols.getFunction(id).flags.collectFirst { case IsMethodOf(cid) => cid }.get)
+            val classArgs = rec.getType match {
+              case ct: ClassType => ct.lookupClass.flatMap(tcd => (tcd +: tcd.ancestors).find(_.cd == cd)).map(_.tps)
+              case _ => None
+            }
+            (cd.typeArgs zip classArgs.getOrElse(cd.typeArgs)).collect {
+              case (`tp`, tpe) if !isFormal(tpe, marked) => (mi: Expr) -> tpe
+            }.toSet
+          case _ => Set.empty
+        } (fd.fullBody).toSeq
+      }.toSeq.sortBy(p => (typeParams(p._2).nonEmpty, p._1.getPos)).headOption
+
+      val instance = site.map(p => s" (here ${p._2.asString(using PrinterOptions())})").getOrElse("")
+      throw MethodsException(site.map(_._1).getOrElse(tp),
+        s"Equality on the class type parameter ${tp.id.name} is not supported yet " +
+        s"when it is instantiated with a type that defines `equals`$instance")
     }
 
     for (fd <- functions if fd.isMethod && fd.typeArgs.exists(marked) &&
