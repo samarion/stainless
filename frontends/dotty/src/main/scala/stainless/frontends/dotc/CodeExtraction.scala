@@ -1471,6 +1471,10 @@ class CodeExtraction(inoxCtx: inox.Context,
     ).setPos(pos)
   }
 
+  /** The type of the result of `body.holds`: a proposition holds a proposition. */
+  private def holdsType(body: tpd.Tree): xt.Type =
+    if (isPropSym(body.tpe.widen.typeSymbol)) xt.PropType() else xt.BooleanType()
+
   private def extractTree(tr: tpd.Tree)(using dctx: DefContext): xt.Expr = (tr match {
     case SingletonTypeTree(tree) => extractTree(tree)
 
@@ -1609,7 +1613,7 @@ class CodeExtraction(inoxCtx: inox.Context,
       })
 
     case t @ ExHoldsWithProofExpression(body, ExMaybeBecauseExpressionWrapper(proof)) =>
-      val vd = xt.ValDef.fresh("holds", xt.BooleanType().setPos(tr.sourcePos)).setPos(tr.sourcePos)
+      val vd = xt.ValDef.fresh("holds", holdsType(body).setPos(tr.sourcePos)).setPos(tr.sourcePos)
       val p = extractTreeOrNoTree(proof)
       val and = xt.And(p, vd.toVariable).setPos(tr.sourcePos)
       val post = xt.Lambda(Seq(vd), and).setPos(tr.sourcePos)
@@ -1617,14 +1621,14 @@ class CodeExtraction(inoxCtx: inox.Context,
       xt.Ensuring(b, post).setPos(post)
 
     case t @ ExHoldsExpression(body) =>
-      val vd = xt.ValDef.fresh("holds", xt.BooleanType().setPos(tr.sourcePos)).setPos(tr.sourcePos)
+      val vd = xt.ValDef.fresh("holds", holdsType(body).setPos(tr.sourcePos)).setPos(tr.sourcePos)
       val post = xt.Lambda(Seq(vd), vd.toVariable).setPos(tr.sourcePos)
       val b = extractTreeOrNoTree(body)
       xt.Ensuring(b, post).setPos(post)
 
     // If the because statement encompasses a holds statement
     case t @ ExBecauseExpression(ExHoldsExpression(body), proof) =>
-      val vd = xt.ValDef.fresh("holds", xt.BooleanType().setPos(tr.sourcePos)).setPos(tr.sourcePos)
+      val vd = xt.ValDef.fresh("holds", holdsType(body).setPos(tr.sourcePos)).setPos(tr.sourcePos)
       val p = extractTree(proof)
       val and = xt.And(p, vd.toVariable).setPos(tr.sourcePos)
       val post = xt.Lambda(Seq(vd), and).setPos(tr.sourcePos)
@@ -1832,6 +1836,8 @@ class CodeExtraction(inoxCtx: inox.Context,
       xt.Swap(extractTree(array1), extractTree(index1), extractTree(array2), extractTree(index2))
 
     case ExCellSwapExpression(cell1, cell2) => xt.CellSwap(extractTree(cell1), extractTree(cell2))
+
+    case ExPropConversion(arg) => extractTree(arg)
 
     case ExForallExpression(fun) =>
       extractTree(fun) match {
@@ -2734,6 +2740,7 @@ class CodeExtraction(inoxCtx: inox.Context,
       case cet: ExprType => extractType(cet.resultType)
 
       case tpe if isBigIntSym(tpe.typeSymbol)        => restoreRefinements(xt.IntegerType())
+      case tpe if isPropSym(tpe.typeSymbol)          => restoreRefinements(xt.PropType())
       case tpe if isRealSym(tpe.typeSymbol)          => restoreRefinements(xt.RealType())
       case tpe if isStringSym(tpe.typeSymbol)        => restoreRefinements(xt.StringType())
       case tpe if isWrappedFloatSym(tpe.typeSymbol)  => restoreRefinements(xt.Float32Type())

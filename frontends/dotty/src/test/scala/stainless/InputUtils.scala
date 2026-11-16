@@ -108,9 +108,10 @@ trait InputUtils {
       }
     }
 
-    // Check that extracted symbols are well-formed
+    // Check that extracted symbols are well-formed, with propositions seen as booleans until
+    // they are inferred
     try {
-      syms.ensureWellFormed
+      frontend.propositionEraser.transform(syms).ensureWellFormed
     } catch {
       case e @ xt.NotWellFormedException(defn, _) =>
         throw extraction.MalformedStainlessCode(defn, e.getMessage)

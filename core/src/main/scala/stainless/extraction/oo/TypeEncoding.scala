@@ -169,6 +169,8 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
 
     ((e, t1, t2) match {
       case (_, t1, t2) if erasedBy(t1) == erasedBy(t2) => e
+      // booleans are propositions, and propositions are checked after the encoding
+      case (_, s.BooleanType() | s.PropType(), s.BooleanType() | s.PropType()) => e
       case (_, t1, t2) if isObject(t1) && isObject(t2) => e
 
       case (e, s.NothingType(), t2) if !isObject(t2) =>

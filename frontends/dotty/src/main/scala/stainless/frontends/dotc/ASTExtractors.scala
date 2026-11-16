@@ -175,6 +175,7 @@ trait ASTExtractors {
   protected lazy val arraySym           = classFromName("scala.Array")
   protected lazy val someClassSym       = classFromName("scala.Some")
   protected lazy val bigIntSym          = classFromName("scala.math.BigInt")
+  protected lazy val propSym            = classFromName("stainless.lang.Prop")
   protected lazy val stringSym          = classFromName("java.lang.String")
   protected lazy val wrappedFloatSym    = classFromName("stainless.lang.WrappedFloat")
   protected lazy val wrappedDoubleSym   = classFromName("stainless.lang.WrappedDouble")
@@ -214,6 +215,8 @@ trait ASTExtractors {
   }
 
   def isBigIntSym(sym: Symbol) : Boolean = getResolvedTypeSym(sym) == bigIntSym
+
+  def isPropSym(sym: Symbol) : Boolean = getResolvedTypeSym(sym) == propSym
 
   def isStringSym(sym: Symbol) : Boolean = getResolvedTypeSym(sym) match { case `stringSym` => true case _ => false }
 
@@ -787,7 +790,7 @@ trait ASTExtractors {
         case Apply(ExSymbol("stainless", "lang", "package$", "WrappedFloat"), Seq(arg)) => Some(arg)
         case Apply(ExSymbol("stainless", "lang", "package$", "WrappedDouble"), Seq(arg)) => Some(arg)
         case Apply(ExSymbol("stainless", "lang", "package$", "Throwing"), Seq(arg)) => Some(arg)
-        case Apply(ExSymbol("stainless", "lang", "package$", "BooleanDecorations"), Seq(arg)) => Some(arg)
+        case Apply(ExSymbol("stainless", "lang", "package$", "BooleanDecorations" | "PropDecorations"), Seq(arg)) => Some(arg)
         case Apply(ExSymbol("stainless", "lang", "package$", "SpecsDecorations"), Seq(arg)) => Some(arg)
         case Apply(ExSymbol("stainless", "lang", "package$", "StringDecorations"), Seq(arg)) => Some(arg)
         case Apply(ExSymbol("stainless", "lang", "package$", "WhileDecorations"), Seq(arg)) => Some(arg)
@@ -1397,7 +1400,7 @@ trait ASTExtractors {
     object ExHoldsExpression {
       def unapply(tree: tpd.Select) : Option[tpd.Tree] = tree match {
         case Select(
-          Apply(ExSymbol("stainless", "lang", "package$", "BooleanDecorations"), realExpr :: Nil),
+          Apply(ExSymbol("stainless", "lang", "package$", "BooleanDecorations" | "PropDecorations"), realExpr :: Nil),
           ExNamed("holds")
         ) => Some(realExpr)
         case _ => None
@@ -1407,7 +1410,7 @@ trait ASTExtractors {
     /** Matches the `holds` expression at the end of any boolean expression with a proof as argument, and returns both of themn.*/
     object ExHoldsWithProofExpression {
       def unapply(tree: tpd.Apply) : Option[(tpd.Tree, tpd.Tree)] = tree match {
-        case Apply(Select(Apply(ExSymbol("stainless", "lang", "package$", "BooleanDecorations"), body :: Nil), ExNamed("holds")), proof :: Nil) =>
+        case Apply(Select(Apply(ExSymbol("stainless", "lang", "package$", "BooleanDecorations" | "PropDecorations"), body :: Nil), ExNamed("holds")), proof :: Nil) =>
           Some((body, proof))
         case _ => None
       }
@@ -1599,6 +1602,15 @@ trait ASTExtractors {
         }
     }
 
+    /** A conversion between a boolean and a proposition, which is a no-op: booleans are
+      * propositions, and the propositions that Scala sees as booleans are checked by Stainless. */
+    object ExPropConversion {
+      def unapply(tree: tpd.Apply): Option[tpd.Tree] = tree match {
+        case Apply(ExSymbol("stainless", "lang", "Prop$", "fromBoolean" | "toBoolean"), List(arg)) => Some(arg)
+        case _ => None
+      }
+    }
+
     object ExForallExpression {
       def unapply(tree: tpd.Apply) : Option[tpd.Tree] = tree match {
         case Apply(TypeApply(ExSymbol("stainless", "lang", "package$", "forall"), _), List(fun)) =>
@@ -1734,7 +1746,7 @@ trait ASTExtractors {
     object ExImplies {
       def unapply(tree: tpd.Apply): Option[(tpd.Tree, tpd.Tree)] = tree match {
         case Apply(Select(
-          lhs@ExSymbol("stainless", "lang", "package$", "BooleanDecorations"),
+          lhs@ExSymbol("stainless", "lang", "package$", "BooleanDecorations" | "PropDecorations"),
           ExNamed("==>") | ExNamed("$eq$eq$greater")), List(rhs)) =>
           Some((lhs, rhs))
         case _ =>
@@ -1746,7 +1758,7 @@ trait ASTExtractors {
     object ExSplitAnd {
       def unapply(tree: tpd.Apply): Option[(tpd.Tree, tpd.Tree)] = tree match {
         case Apply(Select(
-          lhs@ExSymbol("stainless", "lang", "package$", "BooleanDecorations"),
+          lhs@ExSymbol("stainless", "lang", "package$", "BooleanDecorations" | "PropDecorations"),
           ExNamed("&&&") | ExNamed("$amp$amp$amp")), List(rhs)) =>
           Some((lhs, rhs))
         case _ =>

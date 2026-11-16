@@ -5,7 +5,7 @@
 [ Error  ] } else {
 [ Error  ]   val e: Countable[(BigInt) => BigInt] = {
 [ Error  ]     assert(!forall((x: Countable[(BigInt) => BigInt]) => !true), "Choose satisfiability")
-[ Error  ]     choose$12(targetBound)
+[ Error  ]     choose$11(targetBound)
 [ Error  ]   }
 [ Error  ]   assert(lemma(e))
 [ Error  ]   assert(false)
@@ -18,18 +18,18 @@
 [ Error  ]     <empty tree>[{ x: Object | @dropConjunct false }] is of type Object
 [ Error  ]   val e: Countable[(BigInt) => BigInt] = {
 [ Error  ]     assert(!forall((x: Countable[(BigInt) => BigInt]) => !true), "Choose satisfiability")
-[ Error  ]     choose$12(targetBound)
+[ Error  ]     choose$11(targetBound)
 [ Error  ]   }
 [ Error  ]   assert(lemma(e))
 [ Error  ]   assert(false)
 [ Error  ]   <empty tree>[{ x: Object | @dropConjunct false }] is of type Object
 [ Error  ]     assert(!forall((x: Countable[(BigInt) => BigInt]) => !true), "Choose satisfiability")
-[ Error  ]     choose$12(targetBound) is of type Countable[(BigInt) => BigInt]
+[ Error  ]     choose$11(targetBound) is of type Countable[(BigInt) => BigInt]
 [ Error  ]       !forall((x: Countable[(BigInt) => BigInt]) => !true) is of type Prop
 [ Error  ]         forall((x: Countable[(BigInt) => BigInt]) => !true) is of type Prop
 [ Error  ]           !true is of type Boolean
 [ Error  ]             true is of type Boolean
-[ Error  ]       choose$12(targetBound) is of type Countable[(BigInt) => BigInt]
+[ Error  ]       choose$11(targetBound) is of type Countable[(BigInt) => BigInt]
 [ Error  ]         targetBound is of type Prop because choose was instantiated with  with type (Prop) => Countable[(BigInt) => BigInt]
 [ Error  ]     assert(lemma(e))
 [ Error  ]     assert(false)

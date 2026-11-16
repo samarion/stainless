@@ -39,6 +39,15 @@ package object lang {
     }
   }
 
+  @ignore
+  implicit class PropDecorations(val underlying: Prop) {
+    def holds: Prop = underlying
+
+    def holds(becauseOfThat: Prop): Prop = underlying
+
+    def ==>(that: => Prop): Prop = if (underlying) that else true
+  }
+
   @library
   abstract class Exception extends Throwable
 
@@ -76,11 +85,11 @@ package object lang {
 
   @inline @library def because(b: Boolean) = b
 
-  @ignore def forall[A](p: A => Boolean): Boolean = sys.error("Can't execute quantified proposition")
-  @ignore def forall[A,B](p: (A,B) => Boolean): Boolean = sys.error("Can't execute quantified proposition")
-  @ignore def forall[A,B,C](p: (A,B,C) => Boolean): Boolean = sys.error("Can't execute quantified proposition")
-  @ignore def forall[A,B,C,D](p: (A,B,C,D) => Boolean): Boolean = sys.error("Can't execute quantified proposition")
-  @ignore def forall[A,B,C,D,E](p: (A,B,C,D,E) => Boolean): Boolean = sys.error("Can't execute quantified proposition")
+  @ignore def forall[A](p: A => Boolean | Prop): Prop = sys.error("Can't execute quantified proposition")
+  @ignore def forall[A,B](p: (A,B) => Boolean | Prop): Prop = sys.error("Can't execute quantified proposition")
+  @ignore def forall[A,B,C](p: (A,B,C) => Boolean | Prop): Prop = sys.error("Can't execute quantified proposition")
+  @ignore def forall[A,B,C,D](p: (A,B,C,D) => Boolean | Prop): Prop = sys.error("Can't execute quantified proposition")
+  @ignore def forall[A,B,C,D,E](p: (A,B,C,D,E) => Boolean | Prop): Prop = sys.error("Can't execute quantified proposition")
 
   @ignore def choose[A](predicate: A => Boolean): A = sys.error("Can't execute non-deterministic choose")
   @ignore def choose[A,B](predicate: (A,B) => Boolean): (A,B) = sys.error("Can't execute non-deterministic choose")

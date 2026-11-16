@@ -104,5 +104,16 @@ package object frontend {
         super.transform(tpe)
     }
   }
-}
 
+  /** Sees propositions as booleans, for the checks that run before they are inferred: Scala
+    * sees propositions as booleans, so a proposition can be passed where a boolean is
+    * expected until the propositions are inferred and checked, at the end of extraction. */
+  val propositionEraser = extraction.oo.SymbolTransformer(new PropositionEraserImpl(xt, xt))
+
+  class PropositionEraserImpl(override val s: xt.type, override val t: xt.type) extends transformers.ConcreteTreeTransformer(s, t) {
+    override def transform(tpe: xt.Type): xt.Type = tpe match {
+      case xt.PropType() => xt.BooleanType().copiedFrom(tpe)
+      case _ => super.transform(tpe)
+    }
+  }
+}

@@ -98,10 +98,11 @@ class BatchedCallBack(components: Seq[Component])(using val context: inox.Contex
       CallGraphPrinter(symbols)
     }
 
+    val erased = propositionEraser.transform(symbols)
     try {
-      symbols.ensureWellFormed
+      erased.ensureWellFormed
     } catch {
-      case e: symbols.TypeErrorException =>
+      case e: erased.TypeErrorException =>
         reporter.debug(e)
         reportError(e.pos, e.getMessage, symbols)
       case e @ xt.NotWellFormedException(defn, _) =>

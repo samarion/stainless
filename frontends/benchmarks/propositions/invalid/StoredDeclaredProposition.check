@@ -1,0 +1,7 @@
+[ Error  ] StoredDeclaredProposition.scala:7:47: props uses a quantifier as a value. Quantifiers are propositions, which can only be stated:
+[ Error  ] Set(positive(f)) is of type <untyped>
+[ Error  ]   positive(f) is of type Prop
+[ Error  ]     f is of type (BigInt) => BigInt because positive was instantiated with  with type ((BigInt) => BigInt) => Prop
+             def props(f: BigInt => BigInt): Set[Prop] = Set(positive(f))
+                                                         ^^^^^^^^^^^^^^^^
+[ Fatal  ] 1 function(s) use a quantifier as a value

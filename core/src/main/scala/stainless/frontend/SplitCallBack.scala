@@ -179,10 +179,11 @@ class SplitCallBack(components: Seq[Component])(using override val context: inox
       reportErrorFooter(syms)
     }
 
+    val erased = propositionEraser.transform(syms)
     try {
-      syms.ensureWellFormed
+      erased.ensureWellFormed
     } catch {
-      case e: syms.TypeErrorException =>
+      case e: erased.TypeErrorException =>
         reporter.debug(e)
         reportError(e.pos, e.getMessage, syms)
       case e @ xt.NotWellFormedException(defn, _) =>

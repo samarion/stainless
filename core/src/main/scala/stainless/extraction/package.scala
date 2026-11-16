@@ -160,8 +160,8 @@ package object extraction {
     * can't depend on one. Scala only has booleans, so the functions and the variables that are
     * propositions are inferred, and every function that doesn't type is reported.
     *
-    * The program is left as it is: verification handles propositions as booleans, as solvers
-    * do, so a program that passes the check is verified as before. */
+    * Verification then handles propositions as booleans, as solvers do, so the propositions
+    * are erased and a program that passes the check is verified as before. */
   def propositions(using inox.Context): ExtractionPipeline {
     val s: trees.type
     val t: trees.type
@@ -176,9 +176,20 @@ package object extraction {
       override def extract(symbols: s.Symbols): (t.Symbols, ExtractionSummary) = {
         val typed = PropositionInference.transform(symbols.withQuantifiers(QuantifierMode.Propositional))
 
+        // the program with the declared propositions seen as booleans, as Scala sees them
+        object erasure extends extraction.trees.ConcreteSelfTreeTransformer {
+          import extraction.trees._
+          override def transform(tpe: Type): Type = tpe match {
+            case PropType() => BooleanType().copiedFrom(tpe)
+            case _ => super.transform(tpe)
+          }
+        }
+        val erased = symbols.transform(erasure)
+
         // The expressions of `fd` that use a proposition as a value: those that don't type
         // although their operands do. A function is only held to this if all its expressions
-        // type under boolean quantifiers, and to the type of its body otherwise.
+        // type when quantifiers and propositions are booleans, and to the type of its body
+        // otherwise.
         def misuses(fd: s.FunDef): Seq[s.Expr] = {
           import s._
           def untyped(e: Expr)(using Symbols): Seq[Expr] = {
@@ -189,7 +200,7 @@ package object extraction {
             }
             if (inner.nonEmpty) inner else if (e.getType == Untyped) Seq(e) else Seq.empty
           }
-          if (untyped(symbols.getFunction(fd.id).fullBody)(using symbols).nonEmpty) Seq.empty
+          if (untyped(erased.getFunction(fd.id).fullBody)(using erased).nonEmpty) Seq.empty
           else untyped(fd.fullBody)(using typed).distinct.sortBy(_.getPos)
         }
 
@@ -214,7 +225,9 @@ package object extraction {
         }
         if (errors > 0) context.reporter.fatalError(
           s"$errors function(s) use a quantifier as a value")
-        (symbols, ExtractionSummary.NoSummary)
+
+        // verification handles propositions as booleans
+        (erased, ExtractionSummary.NoSummary)
       }
     }
     new PropositionsImpl(extraction.trees, extraction.trees)

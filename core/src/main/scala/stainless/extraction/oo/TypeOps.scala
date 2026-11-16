@@ -121,6 +121,10 @@ trait TypeOps extends innerfuns.TypeOps { self =>
     case (NothingType(), tp) if tp.getType.isTyped => Some(if (upper) tp else NothingType())
     case (tp, NothingType()) if tp.getType.isTyped => Some(if (upper) tp else NothingType())
 
+    // booleans are propositions
+    case (BooleanType(), PropType()) | (PropType(), BooleanType()) =>
+      Some(if (upper) PropType() else BooleanType())
+
     case (FunctionType(from1, to1), FunctionType(from2, to2)) if from1.size == from2.size =>
       val in = (from1 zip from2).map { case (tp1, tp2) => typeBound(tp1, tp2, !upper) }
       val out = typeBound(to1, to2, upper)
