@@ -690,7 +690,7 @@ class TypeChecker(val program: StainlessProgram, val context: inox.Context, val 
           )
         }
 
-      case m: MatchExpr => inferType(tc, matchToIfThenElse(e, false))
+      case m: MatchExpr => inferType(tc, matchToIfThenElse(e, false, keepRefinements = true))
 
       case IfExpr(b, e1, e2) =>
         val (tpe1, tr1) = inferType(tc.withTruth(b).withLastPos(e1), e1)
@@ -1247,7 +1247,7 @@ class TypeChecker(val program: StainlessProgram, val context: inox.Context, val 
         buildVC(tc.withVCKind(kind).setPos(cond), cond) ++
         checkType(tc.withTruth(cond), body, tpe)
 
-      case (m: MatchExpr, _) => checkType(tc, matchToIfThenElse(e, false), tpe)
+      case (m: MatchExpr, _) => checkType(tc, matchToIfThenElse(e, false, keepRefinements = true), tpe)
 
       case (IfExpr(b, e1, e2), _) =>
         checkType(tc.setPos(b).withVCKind(VCKind.CheckType), b, BooleanType()) ++
@@ -1319,7 +1319,21 @@ class TypeChecker(val program: StainlessProgram, val context: inox.Context, val 
         )
 
       case (_, RefinementType(vd, prop)) =>
-        isSubtype(tc, tp1, vd.tpe) ++ buildVC(tc.withVCKind(VCKind.RefinementSubtype), prop)
+        // The property must hold for any value of type `tp1`, so we check it for a fresh binder of that type,
+        // assuming the (possibly nested) refinements of `tp1`
+        def base(tp: Type): Type = exprOps.stripAnnotations(tp) match {
+          case RefinementType(vd1, _) => base(vd1.tpe)
+          case tp => tp
+        }
+        val (tc2, id) = tc.freshBind(vd.copy(tpe = base(tp1)))
+        val v = vd.copy(id = id, tpe = base(tp1)).toVariable
+        def refinements(tp: Type): Seq[Expr] = exprOps.stripAnnotations(tp) match {
+          case RefinementType(vd1, prop1) => refinements(vd1.tpe) :+ substVar(prop1, vd1.id, v)
+          case _ => Seq()
+        }
+        val tc3 = refinements(tp1).foldLeft(tc2)(_ `withTruth` _)
+        isSubtype(tc, tp1, vd.tpe) ++
+        buildVC(tc3.withVCKind(VCKind.RefinementSubtype), substVar(prop, vd.id, v))
 
       case (RefinementType(vd, prop), _) =>
         isSubtype(tc, vd.tpe, tp2)

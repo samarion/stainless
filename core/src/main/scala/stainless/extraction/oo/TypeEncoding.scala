@@ -974,7 +974,14 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
 
       case s.ADTPattern(ob, id, tps, subs) =>
         val sort = s.ADTType(getConstructor(id).sort, tps).copiedFrom(tpe)
-        instanceOfPattern(super.transform(pat, sort), tpe, sort)
+        // Patterns can't test the refinements of type arguments, which are erased at runtime: the
+        // instance check is on the unrefined sort (the type of the scrutinee has no refinements either,
+        // see `TransformerWithType`)
+        val unrefined = s.typeOps.postMap {
+          case s.RefinementType(vd, _) => Some(vd.tpe)
+          case _ => None
+        } (sort)
+        instanceOfPattern(super.transform(pat, sort), tpe, unrefined)
 
       case s.TuplePattern(None, subs) => tpe match {
         case s.TupleType(tps) if subs.size == tps.size => super.transform(pat, tpe)
