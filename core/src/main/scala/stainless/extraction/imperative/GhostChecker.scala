@@ -35,7 +35,7 @@ trait GhostChecker { self: EffectsAnalyzer =>
     def isGhostExpression(e: Expr): Boolean = e match {
       case v: Variable => v.flags contains Ghost
 
-      // This will typically be the case for contracts from `stainless.lang.StaticChecks`
+      // This will typically be the case for contracts from `stainless.lang`, which are only checked statically
       case Annotated(e, flags) if flags contains Ghost => false
 
       // Measures are also considered ghost, as they are never executed

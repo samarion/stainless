@@ -5,6 +5,7 @@ package stainless.io
 import stainless.annotation._
 import stainless.lang.StaticChecks._
 
+import stainless.lang.{require, assert, Ensuring}
 /*
  * NOTEs for GenC:
  * --------------

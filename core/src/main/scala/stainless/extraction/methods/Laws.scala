@@ -103,7 +103,8 @@ class Laws(override val s: Trees, override val t: Trees)
 
       if (!(cd.flags contains s.IsAbstract))
         throw MalformedStainlessCode(fd, "Unexpected law in non-abstract class")
-      if (!symbols.isSubtypeOf(fd.returnType, s.BooleanType()))
+      // a law is a proposition, such as a quantifier
+      if (!symbols.isSubtypeOf(fd.returnType, s.PropType()))
         throw MalformedStainlessCode(fd, "Unexpected non-boolean typed law")
       if (!fd.hasBody)
         throw MalformedStainlessCode(fd, "Unexpected law without a body")
@@ -119,8 +120,9 @@ class Laws(override val s: Trees, override val t: Trees)
       val lid = lawID(fd.id.unsafeToSymbolIdentifier)
 
       val newFd: t.FunDef = {
-        val vd = t.ValDef(FreshIdentifier("res"), t.BooleanType().setPos(fd.fullBody)).setPos(fd.fullBody)
-        val newBody = t.Ensuring(t.NoTree(t.BooleanType().setPos(fd.fullBody)).setPos(fd.fullBody),
+        val lawType = transform(fd.returnType, env)
+        val vd = t.ValDef(FreshIdentifier("res"), lawType).setPos(fd.fullBody)
+        val newBody = t.Ensuring(t.NoTree(lawType).setPos(fd.fullBody),
           t.Lambda(Seq(vd), t.And(
             vd.toVariable,
             t.MethodInvocation(

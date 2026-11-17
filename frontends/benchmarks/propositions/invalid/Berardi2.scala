@@ -23,7 +23,7 @@ object Berardi2 {
   def yes[A] = exists((x: A) => true)
 
   def cem[A]: Either[A, A => Unit] = {
-    if (yes[A]) Left(choose((x: A) => true))
+    if (yes[A].decide) Left(choose((x: A) => true))
     else {
       assert(no[A])
       Right((x: A) => ())

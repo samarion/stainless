@@ -4,16 +4,16 @@ import stainless.lang._
 
 object Partial {
 
-  def exists[T](p: T => Boolean): Boolean = {
+  def exists[T](p: T => Prop): Prop = {
     !forall((t: T) => !p(t))
   }
 
-  def eliminate_exists[T](p: T => Boolean): T = {
+  def eliminate_exists[T](p: T => Prop): T = {
     require(exists[T](p))
     choose[T]((res: T) => p(res))
  }.ensuring(p)
 
-  def maxNegP(j: BigInt, p: BigInt => Boolean): Boolean = {
+  def maxNegP(j: BigInt, p: BigInt => Boolean): Prop = {
     !p(j) && forall((k: BigInt) => !p(k) ==> (k <= j))
   }
 

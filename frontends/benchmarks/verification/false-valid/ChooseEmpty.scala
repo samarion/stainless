@@ -16,7 +16,7 @@ object ChooseEmpty {
 
   // Same as Countable2.theorem
   def theorem() = {
-    if (forall((x: Absurdity) => false))
+    if (forall((x: Absurdity) => false).decide)
       assert(false) // Inox assumes every type is not empty
     else {
       val e: Absurdity = choose((x: Absurdity) => true)

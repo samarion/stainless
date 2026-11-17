@@ -4,6 +4,7 @@ package covcollection
 import annotation._
 import lang.Set
 import lang.StaticChecks._
+import lang.{require, assert, Ensuring}
 
 @library
 sealed abstract class Option[+T] {

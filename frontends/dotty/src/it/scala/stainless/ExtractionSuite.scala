@@ -51,9 +51,11 @@ abstract class ExtractionSuite extends AnyFunSpec with inox.ResourceUtils with I
           userFiltering.debugWithoutSummary(frontend.UserFiltering().transform)(program.symbols)._1
 
         it("should typecheck") {
-          programSymbols.ensureWellFormed
-          for (fd <- programSymbols.functions.values.toSeq) {
-            import programSymbols.{given, _}
+          // propositions are checked by the extraction, after which they are erased
+          val erasedSymbols = frontend.propositionEraser.transform(programSymbols)
+          erasedSymbols.ensureWellFormed
+          for (fd <- erasedSymbols.functions.values.toSeq) {
+            import erasedSymbols.{given, _}
             assert(isSubtypeOf(fd.fullBody.getType, fd.getType))
           }
         }

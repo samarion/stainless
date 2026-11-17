@@ -17,7 +17,7 @@ object Berardi3 {
     !forall((t: T) => !p(t))
   }
 
-  def forallElim[T](p: T => Boolean, t: T) = {
+  def forallElim[T](p: T => Prop, t: T) = {
     require(forall(p))
     p(t)
   }.holds
@@ -39,7 +39,7 @@ object Berardi3 {
   type Not[A] = A => False
 
   def cem[A](): Either[A,Not[A]] = {
-    if (exists((a: A) => true))
+    if (exists((a: A) => true).decide)
       Left(choose((a: A) => true))
     else {
       assert(forall((x: A) => false))

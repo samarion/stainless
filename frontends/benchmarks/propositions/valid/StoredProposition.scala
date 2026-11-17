@@ -1,13 +1,13 @@
 import stainless.lang._
 
-// Data can hold propositions: fields, tuples and map values that are given one are
-// propositions, and the equality of such data is a proposition too.
+// Data can hold propositions: fields, tuples and map values can be propositions, and the
+// equality of such data is a proposition too.
 object StoredProposition {
-  case class Claim(holds: Boolean, at: BigInt)
+  case class Claim(holds: Prop, at: BigInt)
 
   def positive(f: BigInt => BigInt): Claim = Claim(forall((x: BigInt) => f(x) > 0), 0)
 
-  def pair(f: BigInt => BigInt): (Boolean, BigInt) =
+  def pair(f: BigInt => BigInt): (Prop, BigInt) =
     (forall((x: BigInt) => f(x) > 0), f(0))
 
   def useClaim(f: BigInt => BigInt): Unit = {

@@ -8,7 +8,7 @@ object SetIsEmpty {
     Set().isEmpty
   }.holds
 
-   def emptyContainsNothing[A](set: Set[A]): Boolean = {
+   def emptyContainsNothing[A](set: Set[A]): Prop = {
      set.isEmpty ==> forall((x: A) => !set.contains(x))
    }.holds
 

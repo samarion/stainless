@@ -2,7 +2,7 @@ import stainless.lang._
 
 // The equality of data that holds propositions is a proposition, so it can't be decided.
 object DecidedByEquality {
-  case class Claim(holds: Boolean, at: BigInt)
+  case class Claim(holds: Prop, at: BigInt)
 
   def positive(f: BigInt => BigInt): Claim = Claim(forall((x: BigInt) => f(x) > 0), 0)
 

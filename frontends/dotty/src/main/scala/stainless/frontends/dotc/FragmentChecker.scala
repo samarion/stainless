@@ -369,7 +369,7 @@ class FragmentChecker(inoxCtx: inox.Context)(using override val dottyCtx: DottyC
     val isExtern = ExternAnnotation.exists(sym.hasAnnotation)
     val isIgnore = IgnoreAnnotation.exists(sym.hasAnnotation)
     // * If it's a synthetic symbol, we will still visit if it is either:
-    //    -the scala Ensuring method (that creates the Ensuring class), which for some reasons is synthetic (though StaticChecks.Ensuring is not for instance)
+    //    -the scala Ensuring method (that creates the Ensuring class), which for some reasons is synthetic (though stainless.lang.Ensuring is not for instance)
     //    -an anonymous function
     //    -an anonymous class
     // * We furthermore ignore ClassTag[T].apply() that appear for Array operations, which we can still extract.
@@ -389,7 +389,7 @@ class FragmentChecker(inoxCtx: inox.Context)(using override val dottyCtx: DottyC
 
     private val RequireMethods =
       defn.ScalaPredefModule.info.decl(Names.termName("require")).alternatives.toSet
-        ++ getModuleIfDefinedOrNone("stainless.lang.StaticChecks").map(_.info.decl(Names.termName("require")).alternatives.toSet).getOrElse(Set.empty)
+        ++ StainlessLangPackage.map(_.info.decl(Names.termName("require")).alternatives.toSet).getOrElse(Set.empty)
 
     private val stainlessReplacement = mutable.Map(
       defn.ListClass -> "stainless.collection.List",
@@ -425,6 +425,11 @@ class FragmentChecker(inoxCtx: inox.Context)(using override val dottyCtx: DottyC
     private def addOverloadsToMap(denot: Denotation, replacement: String): Unit =
       denot.alternatives.foreach(a => stainlessReplacement += a.symbol -> replacement)
 
+    private val PropClass = getClassIfDefinedOrNone("stainless.lang.Prop")
+
+    private def isPropOrBoolean(tp: Type): Boolean =
+      (tp frozen_<:< defn.BooleanType) || PropClass.exists(tp.widen.typeSymbol == _)
+
     private def checkType(tree: tpd.Tree, tpe: Type): Unit = {
       object Errors {
         def empty: Errors = Errors(Set.empty, Set.empty)
@@ -440,6 +445,9 @@ class FragmentChecker(inoxCtx: inox.Context)(using override val dottyCtx: DottyC
               // We do not traverse SuperType as it contains all hierarchy,
               // including traits such as Product, etc. we do not support.
               return acc
+
+            // The extraction turns `Boolean | Prop` into a proposition
+            case OrType(l, r) if isPropOrBoolean(l) && isPropOrBoolean(r) => return acc
 
             case ot: OrType =>
               // The extraction replace OrType with their join, so we do the same here to catch potential "Matchable" types

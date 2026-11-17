@@ -1,5 +1,6 @@
 import stainless.lang.StaticChecks.*
 
+import stainless.lang.{require, assert, Ensuring}
 object i667b:
 
   def inPostcondition(s: String): Unit = {

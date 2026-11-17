@@ -8,17 +8,17 @@ import stainless.annotation._
 
 object Predicate {
 
-  def exists[A](p: A => Boolean): Boolean = !forall((a: A) => !p(a))
+  def exists[A](p: A => Boolean | Prop): Prop = !forall((a: A) => !p(a))
 
   // Monadic bind
   @inline
-  def flatMap[A,B](p: A => Boolean, f: A => (B => Boolean)): B => Boolean = {
+  def flatMap[A,B](p: A => Boolean | Prop, f: A => (B => Boolean)): B => Prop = {
     (b: B) => exists[A](a => p(a) && f(a)(b))
   }
 
   // All monads are also functors, and they define the map function
   @inline
-  def map[A,B](p: A => Boolean, f: A => B): B => Boolean = {
+  def map[A,B](p: A => Boolean | Prop, f: A => B): B => Prop = {
     (b: B) => exists[A](a => p(a) && f(a) == b)
   }
 
@@ -35,11 +35,11 @@ object Predicate {
   }
   */
 
-  def equals[A](p: A => Boolean, that: A => Boolean): Boolean = {
+  def equals[A](p: A => Boolean | Prop, that: A => Boolean | Prop): Prop = {
     forall[A](a => p(a) == that(a))
   }
 
-  def test[A,B,C](p: A => Boolean, f: A => B, g: B => C): Boolean = {
+  def test[A,B,C](p: A => Boolean, f: A => B, g: B => C): Prop = {
     equals[C](map[B,C](map[A,B](p, f), g), map[A,C](p, (a: A) => g(f(a))))
   }.holds
 

@@ -13,6 +13,6 @@ trait B {
     f(a)
     // we cannot ensure that `a` has not changed during the call to `f`
     // See similar example in verification/valid/ImmutableTrait.scala
-    stainless.lang.StaticChecks.assert(a == a0)
+    stainless.lang.assert(a == a0)
   }
 }

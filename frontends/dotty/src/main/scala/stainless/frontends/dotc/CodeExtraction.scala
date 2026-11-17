@@ -572,6 +572,8 @@ class CodeExtraction(inoxCtx: inox.Context,
     }
 
     var invariants: Seq[xt.Expr] = Seq.empty
+    // whether an invariant states a proposition, which makes the invariant a proposition
+    var propInvariant = false
     var methods: Seq[xt.FunDef] = Seq.empty
     var typeMembers: Seq[xt.TypeDef] = Seq.empty
 
@@ -606,6 +608,7 @@ class CodeExtraction(inoxCtx: inox.Context,
       case ExRequiredExpression(body, isStatic) =>
         def wrap(x: xt.Expr) = if (isStatic) xt.Annotated(x, Seq(xt.Ghost)).setPos(x) else x
         invariants :+= wrap(extractTree(body)(using tpCtx))
+        propInvariant ||= isPropBody(body)
 
       // We cannot extract copy method if the class has extern fields as
       // the type of copy and the getters mention what might be a type we
@@ -651,7 +654,8 @@ class CodeExtraction(inoxCtx: inox.Context,
     val optInv = if (invariants.isEmpty) None else Some({
       val id = symbolMapping.fetchInvIdForClass(sym)
       val pos = inox.utils.Position.between(invariants.map(_.getPos).min, invariants.map(_.getPos).max)
-      new xt.FunDef(id, Seq.empty, Seq.empty, xt.BooleanType().setPos(pos),
+      val tpe = if (propInvariant) xt.PropType() else xt.BooleanType()
+      new xt.FunDef(id, Seq.empty, Seq.empty, tpe.setPos(pos),
         if (invariants.size == 1) invariants.head else xt.And(invariants).setPos(pos),
         (Seq(xt.IsInvariant) ++
           annots.filterNot(annot =>
@@ -1471,9 +1475,18 @@ class CodeExtraction(inoxCtx: inox.Context,
     ).setPos(pos)
   }
 
-  /** The type of the result of `body.holds`: a proposition holds a proposition. */
-  private def holdsType(body: tpd.Tree): xt.Type =
-    if (isPropSym(body.tpe.widen.typeSymbol)) xt.PropType() else xt.BooleanType()
+  /** Whether Scala types a specification as a proposition, under its conversion from a boolean. */
+  private def isPropBody(body: tpd.Tree): Boolean = body match {
+    case ExPropConversion(arg) if arg ne body => !(arg.tpe frozen_<:< defn.BooleanType)
+    case _ => isPropSym(body.tpe.widen.typeSymbol)
+  }
+
+  private def isPropOrBoolean(tpe: Type): Boolean =
+    (tpe frozen_<:< defn.BooleanType) || isPropSym(tpe.widen.typeSymbol)
+
+  /** The type of the result of `body.holds`: a proposition, since a body that Scala types as
+    * a boolean can still be one for Stainless, such as an equality with a proposition. */
+  private def holdsType(body: tpd.Tree): xt.Type = xt.PropType()
 
   private def extractTree(tr: tpd.Tree)(using dctx: DefContext): xt.Expr = (tr match {
     case SingletonTypeTree(tree) => extractTree(tree)
@@ -1595,7 +1608,7 @@ class CodeExtraction(inoxCtx: inox.Context,
           val tpe = extractType(tr)
           val vd = xt.ValDef.fresh("res", tpe).setPos(post)
           xt.Lambda(Seq(vd), wrap(extractType(contract) match {
-            case xt.BooleanType() => post
+            case xt.BooleanType() | xt.PropType() => post
             case _ => xt.Application(other, Seq(vd.toVariable)).setPos(post)
           })).setPos(post)
       })
@@ -2914,6 +2927,9 @@ class CodeExtraction(inoxCtx: inox.Context,
       case AndType(prod, tp) if defn.isProductClass(prod.typeSymbol) => extractType(tp)
       case AndType(tp, ser) if ser.typeSymbol == defn.SerializableClass => extractType(tp)
       case AndType(ser, tp) if ser.typeSymbol == defn.SerializableClass => extractType(tp)
+
+      // `Boolean | Prop`, the result of the functions given to `forall` and `ensuring`
+      case OrType(l, r) if isPropOrBoolean(l) && isPropOrBoolean(r) => restoreRefinements(xt.PropType())
 
       case ot: OrType => extractType(ot.join)
 

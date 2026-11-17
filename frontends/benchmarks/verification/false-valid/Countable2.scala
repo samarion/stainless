@@ -30,7 +30,7 @@ object Countable2 {
   }.holds
 
   def theorem() = {
-    if (forall((x: Empty) => false))
+    if (forall((x: Empty) => false).decide)
       assert(false) // Inox assumes every type is not empty
     else {
       val e: Empty = choose((x: Empty) => true)

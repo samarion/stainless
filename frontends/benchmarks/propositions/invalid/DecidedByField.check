@@ -8,6 +8,6 @@
 [ Error  ]     targetBound is of type Claim
 [ Error  ]   1 is of type BigInt
 [ Error  ]   0 is of type BigInt
-             def decide(f: BigInt => BigInt): BigInt = if (positive(f).holds) 1 else 0
-                                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+             def decide(f: BigInt => BigInt): BigInt = if (positive(f).holds.decide) 1 else 0
+                                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 [ Fatal  ] 1 function(s) use a quantifier as a value

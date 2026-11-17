@@ -2,15 +2,15 @@ import stainless.lang._
 
 object AssociativityProperties {
 
-  def isAssociative[A](f: (A,A) => A): Boolean = {
+  def isAssociative[A](f: (A,A) => A): Prop = {
     forall((x: A, y: A, z: A) => f(f(x, y), z) == f(x, f(y, z)))
   }
 
-  def isCommutative[A](f: (A,A) => A): Boolean = {
+  def isCommutative[A](f: (A,A) => A): Prop = {
     forall((x: A, y: A) => f(x, y) == f(y, x))
   }
 
-  def isRotate[A](f: (A,A) => A): Boolean = {
+  def isRotate[A](f: (A,A) => A): Prop = {
     forall((x: A, y: A, z: A) => f(f(x, y), z) == f(f(y, z), x))
   }
 
@@ -20,12 +20,12 @@ object AssociativityProperties {
     isAssociative(fp)
   }.holds
 
-  def assocRotate[A](f: (A,A) => A): Boolean = {
+  def assocRotate[A](f: (A,A) => A): Prop = {
     require(isCommutative(f) && isRotate(f))
     isAssociative(f)
   }.holds
 
-  def assocRotateInt(f: (BigInt, BigInt) => BigInt): Boolean = {
+  def assocRotateInt(f: (BigInt, BigInt) => BigInt): Prop = {
     require(isCommutative(f) && isRotate(f))
     isAssociative(f)
   }.holds

@@ -5,7 +5,7 @@
 [ Error  ]     choose$2[A](targetBound)
 [ Error  ]   })
 [ Error  ] } else {
-[ Error  ]   assert(no[A])
+[ Error  ]   assert(@ghost no[A])
 [ Error  ]   Right[A, (A) => Unit]((x: A) => ())
 [ Error  ] } is of type <untyped>
 [ Error  ]   targetBound is of type Prop
@@ -21,12 +21,13 @@
 [ Error  ]             true is of type Boolean
 [ Error  ]       choose$2[A](targetBound) is of type A
 [ Error  ]         targetBound is of type Prop because choose was instantiated with A:=A with type (Prop) => A because Left was instantiated with A:=A,B:=(A) => Unit with fields (A)
-[ Error  ]   assert(no[A])
+[ Error  ]   assert(@ghost no[A])
 [ Error  ]   Right[A, (A) => Unit]((x: A) => ()) is of type Either[A, (A) => Unit]
-[ Error  ]     no[A] is of type Prop because no was instantiated with A:=A with type () => Prop
+[ Error  ]     @ghost no[A] is of type Prop
+[ Error  ]       no[A] is of type Prop because no was instantiated with A:=A with type () => Prop
 [ Error  ]     Right[A, (A) => Unit]((x: A) => ()) is of type Either[A, (A) => Unit]
 [ Error  ]       (x: A) => () is of type (A) => Unit
 [ Error  ]         () is of type Unit because Right was instantiated with A:=A,B:=(A) => Unit with fields ((A) => Unit)
-               if (yes[A]) Left(choose((x: A) => true))
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^...
+               if (yes[A].decide) Left(choose((x: A) => true))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^...
 [ Fatal  ] 1 function(s) use a quantifier as a value

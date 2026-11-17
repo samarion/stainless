@@ -13,7 +13,7 @@ object BSTSimpler {
     case Node(l, v, r) => content(l) ++ Set(v) ++ content(r)
   }
 
-  def isBST(tree: Tree) : Boolean = tree match {
+  def isBST(tree: Tree) : Prop = tree match {
     case Leaf() => true
     case Node(left, v, right) => {
       isBST(left) && isBST(right) &&

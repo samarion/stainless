@@ -5,15 +5,15 @@ import stainless.lang._
 
 object Partial:
 
-  def existsM[T](p: T => Boolean): Boolean =
+  def existsM[T](p: T => Prop): Prop =
     !forall((t: T) => !p(t))
 
-  def eliminate_existsM[T](p: T => Boolean): T = {
+  def eliminate_existsM[T](p: T => Prop): T = {
     require(existsM[T](p))
     choose[T]((res: T) => p(res))
  }.ensuring(p)
 
-  def maxNegPM(j: BigInt, p: BigInt => Boolean): Boolean =
+  def maxNegPM(j: BigInt, p: BigInt => Boolean): Prop =
     !p(j) && forall((k: BigInt) => !p(k) ==> (k <= j))
 
   def fM(x: BigInt, p: BigInt => Boolean): BigInt =
@@ -23,10 +23,10 @@ object Partial:
     else  x
 
 
-  def exists[T](p: T => Boolean): Boolean =
+  def exists[T](p: T => Prop): Prop =
     !forall((t: T) => !p(t))
 
-  def maxNegP(p: BigInt => Boolean, j: BigInt): Boolean =
+  def maxNegP(p: BigInt => Boolean, j: BigInt): Prop =
     if p(j) then
       false
     else

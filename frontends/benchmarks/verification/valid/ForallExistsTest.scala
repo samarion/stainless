@@ -1,6 +1,7 @@
 import stainless.lang.Quantifiers.*
 import stainless.annotation.*
 import stainless.lang.StaticChecks.*
+import stainless.lang.{require, assert, Ensuring}
 import stainless.lang.Ensures.*
 import stainless.lang.unfold
 object ForallExistsTest:
@@ -28,7 +29,7 @@ object ForallExistsTest:
     val pNot = (x:BigInt) => !Exists((y: BigInt) => (x + x + x + x) < y && y % 2 == 0)
     val p = (x:BigInt) => Exists((y: BigInt) => (x + x + x + x) < y && y % 2 == 0)
     {
-      if Exists(pNot) then
+      if Exists(pNot).decide then
         val w: BigInt = pickWitness[BigInt](pNot)
         forAny(w)
       else
@@ -37,7 +38,7 @@ object ForallExistsTest:
   }
 
   @ghost @extern
-  def pickingAny[T](f: T => Unit, property: T => Boolean): Unit = {
+  def pickingAny[T](f: T => Unit, property: T => Boolean | stainless.lang.Prop): Unit = {
     require(ensures(f, (input:T, _:Unit) => property(input)))
     ()
   }.ensuring(_ => Forall(property))

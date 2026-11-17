@@ -28,7 +28,7 @@ object Berardi1 {
   type Not[A] = A => False
 
   def cem[A](): Either[A,Not[A]] = {
-    if (exists((a: A) => true))
+    if (exists((a: A) => true).decide)
       Left(choose((a: A) => true))
     else {
       assert(forall((x: A) => false))

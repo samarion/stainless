@@ -9,6 +9,6 @@
 [ Error  ]     f is of type (BigInt) => BigInt
 [ Error  ]     0 is of type BigInt
 [ Error  ]   1 is of type BigInt
-             def decide(f: BigInt => BigInt): BigInt = if (isPositive(f)) f(0) else BigInt(1)
-                                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+             def decide(f: BigInt => BigInt): BigInt = if (isPositive(f).decide) f(0) else BigInt(1)
+                                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 [ Fatal  ] 1 function(s) use a quantifier as a value

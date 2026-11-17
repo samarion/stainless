@@ -7,6 +7,6 @@
 [ Error  ]   targetBound is of type Prop
 [ Error  ]   0 is of type BigInt
 [ Error  ]   1 is of type BigInt
-             def isEmpty[A]: BigInt = if (forall((a: A) => false)) BigInt(0) else BigInt(1)
-                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+             def isEmpty[A]: BigInt = if (forall((a: A) => false).decide) BigInt(0) else BigInt(1)
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 [ Fatal  ] 1 function(s) use a quantifier as a value

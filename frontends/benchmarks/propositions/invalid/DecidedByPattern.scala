@@ -2,7 +2,7 @@ import stainless.lang._
 
 // Matching a proposition against a literal would decide it.
 object DecidedByPattern {
-  case class Claim(holds: Boolean, at: BigInt)
+  case class Claim(holds: Prop, at: BigInt)
 
   def positive(f: BigInt => BigInt): Claim = Claim(forall((x: BigInt) => f(x) > 0), 0)
 

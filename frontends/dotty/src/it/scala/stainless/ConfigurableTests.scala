@@ -55,7 +55,7 @@ trait ConfigurableTests extends inox.ResourceUtils with InputUtils {
     }
 
     val programSymbols = userFiltering.debugWithoutSummary(frontend.UserFiltering().transform)(program.symbols)._1
-    programSymbols.ensureWellFormed
+    frontend.propositionEraser.transform(programSymbols).ensureWellFormed
 
     Some((runs, programSymbols))
   }

@@ -4,7 +4,7 @@
 import stainless.lang._
 
 // unimport implicit conversions for `.updated`
-import scala.Predef.{ genericArrayOps => _, genericWrapArray => _, copyArrayToImmutableIndexedSeq => _, _ }
+import scala.Predef.{ genericArrayOps => _, genericWrapArray => _, copyArrayToImmutableIndexedSeq => _, require => _, assert => _, Ensuring => _, _ }
 
 object Arrays {
 

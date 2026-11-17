@@ -7,6 +7,6 @@
 [ Error  ]   targetBound is of type Prop
 [ Error  ]   1 is of type BigInt
 [ Error  ]   0 is of type BigInt
-               val r = if (isPositive(f)) { (); BigInt(1) } else BigInt(0)
-                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+               val r = if (isPositive(f).decide) { (); BigInt(1) } else BigInt(0)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 [ Fatal  ] 1 function(s) use a quantifier as a value

@@ -33,10 +33,37 @@ package object lang {
       if (underlying) that else true
     }
 
+    def ==>(that: => Prop): Prop = !underlying || that
+
     // Use this "and" operator instead of `&&` when you want verification conditions to be split
     def &&&(that: => Boolean): Boolean = {
       if (underlying) that else false
     }
+  }
+
+  // The specifications, which are propositions: they are only checked statically.
+
+  @library
+  def require(@ghost pred: => Prop): Unit = ()
+
+  @library
+  def require(@ghost pred: => Prop, msg: => String): Unit = ()
+
+  @library
+  def assert(@ghost pred: => Prop): Unit = ()
+
+  @library
+  def assert(@ghost pred: => Prop, msg: => String): Unit = ()
+
+  @library
+  implicit class Ensuring[A](val x: A) extends AnyVal {
+    def ensuring(@ghost cond: A => Boolean | Prop): A = x
+
+    def ensuring(@ghost cond: A => Boolean | Prop, msg: => String): A = x
+
+    def ensuring(@ghost cond: Prop): A = x
+
+    def ensuring(@ghost cond: Prop, msg: => String): A = x
   }
 
   @ignore
@@ -45,7 +72,7 @@ package object lang {
 
     def holds(becauseOfThat: Prop): Prop = underlying
 
-    def ==>(that: => Prop): Prop = if (underlying) that else true
+    def ==>(that: => Prop): Prop = !underlying || that
   }
 
   @library
@@ -91,11 +118,11 @@ package object lang {
   @ignore def forall[A,B,C,D](p: (A,B,C,D) => Boolean | Prop): Prop = sys.error("Can't execute quantified proposition")
   @ignore def forall[A,B,C,D,E](p: (A,B,C,D,E) => Boolean | Prop): Prop = sys.error("Can't execute quantified proposition")
 
-  @ignore def choose[A](predicate: A => Boolean): A = sys.error("Can't execute non-deterministic choose")
-  @ignore def choose[A,B](predicate: (A,B) => Boolean): (A,B) = sys.error("Can't execute non-deterministic choose")
-  @ignore def choose[A,B,C](predicate: (A,B,C) => Boolean): (A,B,C) = sys.error("Can't execute non-deterministic choose")
-  @ignore def choose[A,B,C,D](predicate: (A,B,C,D) => Boolean): (A,B,C,D) = sys.error("Can't execute non-deterministic choose")
-  @ignore def choose[A,B,C,D,E](predicate: (A,B,C,D,E) => Boolean): (A,B,C,D,E) = sys.error("Can't execute non-deterministic choose")
+  @ignore def choose[A](predicate: A => Boolean | Prop): A = sys.error("Can't execute non-deterministic choose")
+  @ignore def choose[A,B](predicate: (A,B) => Boolean | Prop): (A,B) = sys.error("Can't execute non-deterministic choose")
+  @ignore def choose[A,B,C](predicate: (A,B,C) => Boolean | Prop): (A,B,C) = sys.error("Can't execute non-deterministic choose")
+  @ignore def choose[A,B,C,D](predicate: (A,B,C,D) => Boolean | Prop): (A,B,C,D) = sys.error("Can't execute non-deterministic choose")
+  @ignore def choose[A,B,C,D,E](predicate: (A,B,C,D,E) => Boolean | Prop): (A,B,C,D,E) = sys.error("Can't execute non-deterministic choose")
 
   @ignore def decreases(@ghost r1: Any): Unit = ()
   @ignore def decreases(@ghost r1: Any, @ghost r2: Any): Unit = ()
@@ -194,6 +221,10 @@ package object lang {
   // this adds an equality between the call, and the inlined call
   @library
   def unfold[T](call: T): Unit = ()
+
+  // a type argument can't be a proposition
+  @library
+  def unfold(call: Prop): Unit = ()
 
   @ignore @library
   implicit class ArrayUpdating[T](a: Array[T]) {

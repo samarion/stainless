@@ -916,7 +916,7 @@ class AntiAliasing(override val s: Trees)(override val t: s.type)(using override
               Lambda(params, transform(wrappedBody, env)).copiedFrom(l)
             }
 
-          case fi @ (_: FunctionInvocation | UnfoldOpaque(_)) =>
+          case fi @ (_: FunctionInvocation | UnfoldOpaque(_, _, _)) =>
             def mapFnInvoc(fi: FunctionInvocation, selectResult: Boolean): (Type, Expr) = {
               val fd = Outer(fi.tfd.fd)
 
@@ -932,9 +932,10 @@ class AntiAliasing(override val s: Trees)(override val t: s.type)(using override
               (nfiType, res)
             }
             fi match {
-              case UnfoldOpaque(unfoldId, theFi) =>
+              case UnfoldOpaque(unfoldId, tps, theFi) =>
                 val (resTpe, transformedInvoc) = mapFnInvoc(theFi, selectResult = false)
-                FunctionInvocation(unfoldId, Seq(resTpe), Seq(transformedInvoc)).setPos(fi)
+                // the overload for propositions has no type parameter
+                FunctionInvocation(unfoldId, tps.map(_ => resTpe), Seq(transformedInvoc)).setPos(fi)
               case fi: FunctionInvocation => mapFnInvoc(fi, selectResult = true)._2
             }
 
@@ -1068,9 +1069,9 @@ class AntiAliasing(override val s: Trees)(override val t: s.type)(using override
         }
 
         object UnfoldOpaque {
-          def unapply(e: Expr): Option[(Identifier, FunctionInvocation)] = e match {
-            case FunctionInvocation(id @ ast.SymbolIdentifier("stainless.lang.unfold"), Seq(_), Seq(fi: s.FunctionInvocation)) =>
-              Some((id, fi))
+          def unapply(e: Expr): Option[(Identifier, Seq[Type], FunctionInvocation)] = e match {
+            case FunctionInvocation(id @ ast.SymbolIdentifier("stainless.lang.unfold"), tps, Seq(fi: s.FunctionInvocation)) =>
+              Some((id, tps, fi))
             case _ => None
           }
         }

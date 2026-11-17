@@ -4,6 +4,7 @@ package stainless.util
 
 import stainless.annotation._
 import stainless.lang.StaticChecks._
+import stainless.lang.{require, assert, Ensuring}
 import stainless.io._
 
 object Random {

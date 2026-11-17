@@ -1,4 +1,4 @@
-[ Error  ] DecidedByPredicate.scala:5:45: count uses a quantifier as a value. Quantifiers are propositions, which can only be stated:
+[ Error  ] DecidedByPredicate.scala:5:42: count uses a quantifier as a value. Quantifiers are propositions, which can only be stated:
 [ Error  ] if (targetBound) {
 [ Error  ]   1
 [ Error  ] } else {
@@ -7,6 +7,6 @@
 [ Error  ]   targetBound is of type Prop
 [ Error  ]   1 is of type BigInt
 [ Error  ]   0 is of type BigInt
-             def count(p: BigInt => Boolean): BigInt = if (p(0)) BigInt(1) else BigInt(0)
-                                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+             def count(p: BigInt => Prop): BigInt = if (p(0).decide) BigInt(1) else BigInt(0)
+                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 [ Fatal  ] 1 function(s) use a quantifier as a value
