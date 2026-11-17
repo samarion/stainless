@@ -56,7 +56,7 @@ object TreeSanitizerTest {
   def ok3bis = {
     val a = (x: BigInt) => x
     val b = (x: BigInt) => x
-    stainless.lang.assert(a == b)
+    StaticChecks.assert(a == b)
   }
 
   def compare(prop: Boolean): Unit = ()
@@ -88,7 +88,7 @@ object TreeSanitizerTest {
       @ghost def innerOk(test: Boolean): Boolean = test && a == b // ok
       def innerBad(@ghost test: Boolean): Boolean = a == b // bad
     }
-    stainless.lang.assert(InnerClass().innerOk(a == b)) // ok
+    StaticChecks.assert(InnerClass().innerOk(a == b)) // ok
     assert(InnerClass().innerBad(a == b)) // ok
   }
 

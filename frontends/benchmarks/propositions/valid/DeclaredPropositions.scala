@@ -1,4 +1,5 @@
 import stainless.lang._
+import stainless.lang.StaticChecks._
 
 // Propositions can be declared: `forall` is a `Prop`, and so can be results, parameters,
 // fields and tuple components. Booleans are propositions.

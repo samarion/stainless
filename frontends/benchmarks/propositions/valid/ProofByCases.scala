@@ -1,4 +1,5 @@
 import stainless.lang._
+import stainless.lang.StaticChecks._
 import stainless.annotation._
 
 // A term of type Unit is a proof: a term can decide a quantifier to choose between two of
@@ -14,7 +15,6 @@ object ProofByCases {
 
   @ghost
   def cases(f: BigInt => BigInt): Unit = {
-    if (isPositive(f).decide) positiveAtZero(f)
-    else ()
+    isPositive(f).cases(positiveAtZero(f), ())
   }.ensuring(_ => !isPositive(f) || f(0) > 0)
 }

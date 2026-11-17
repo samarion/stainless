@@ -1,6 +1,5 @@
 import stainless.lang.StaticChecks._
 
-import stainless.lang.{require, assert, Ensuring}
 object RequireEnsuringMessagesStaticChecks {
   case class MyClass(a: Int) {
     require(a > 0, "a must be strictly positive")

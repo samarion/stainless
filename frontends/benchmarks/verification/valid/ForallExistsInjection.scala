@@ -2,7 +2,6 @@ import stainless.lang.{ghost => ghostExpr}
 import stainless.lang.Quantifiers.*
 import stainless.annotation.*
 import stainless.lang.StaticChecks.*
-import stainless.lang.{require, assert, Ensuring}
 import stainless.lang.Ensures.*
 import stainless.lang.unfold
 import stainless.lang.Option

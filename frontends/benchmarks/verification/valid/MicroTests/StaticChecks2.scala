@@ -1,6 +1,5 @@
 import stainless.lang.StaticChecks._
 
-import stainless.lang.{require, assert, Ensuring}
 object StaticChecks2 {
 
   def add(n: BigInt, m: BigInt): BigInt = {

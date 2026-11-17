@@ -369,7 +369,7 @@ class FragmentChecker(inoxCtx: inox.Context)(using override val dottyCtx: DottyC
     val isExtern = ExternAnnotation.exists(sym.hasAnnotation)
     val isIgnore = IgnoreAnnotation.exists(sym.hasAnnotation)
     // * If it's a synthetic symbol, we will still visit if it is either:
-    //    -the scala Ensuring method (that creates the Ensuring class), which for some reasons is synthetic (though stainless.lang.Ensuring is not for instance)
+    //    -the scala Ensuring method (that creates the Ensuring class), which for some reasons is synthetic (though StaticChecks.Ensuring is not for instance)
     //    -an anonymous function
     //    -an anonymous class
     // * We furthermore ignore ClassTag[T].apply() that appear for Array operations, which we can still extract.
@@ -389,7 +389,7 @@ class FragmentChecker(inoxCtx: inox.Context)(using override val dottyCtx: DottyC
 
     private val RequireMethods =
       defn.ScalaPredefModule.info.decl(Names.termName("require")).alternatives.toSet
-        ++ StainlessLangPackage.map(_.info.decl(Names.termName("require")).alternatives.toSet).getOrElse(Set.empty)
+        ++ getModuleIfDefinedOrNone("stainless.lang.StaticChecks").map(_.info.decl(Names.termName("require")).alternatives.toSet).getOrElse(Set.empty)
 
     private val stainlessReplacement = mutable.Map(
       defn.ListClass -> "stainless.collection.List",

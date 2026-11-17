@@ -1,6 +1,7 @@
 /* Copyright 2009-2021 EPFL, Lausanne */
 
 import stainless.lang._
+import stainless.lang.StaticChecks._
 
 object HOInvocations2 {
   def switch(x: BigInt, f: (BigInt) => BigInt, g: (BigInt) => BigInt) = if(x > 0) f else g

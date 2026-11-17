@@ -1,4 +1,5 @@
 import stainless.lang._
+import stainless.lang.StaticChecks._
 import stainless.util.Random
 import stainless.collection._
 import stainless.lang._

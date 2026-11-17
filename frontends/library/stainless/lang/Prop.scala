@@ -9,7 +9,7 @@ import scala.language.implicitConversions
   *
   * Booleans are propositions, but a proposition is not a boolean: it can be combined with
   * `&&`, `||`, `!` and `==>`, and stated with `require`, `assert`, `ensuring` or `holds`, but
-  * not used in a condition, except in a proof by cases with `decide`.
+  * not decided: `cases` branches on it, between two proofs or two propositions.
   */
 @ignore
 final class Prop private (private val truth: Boolean) {
@@ -17,9 +17,12 @@ final class Prop private (private val truth: Boolean) {
   def ||(that: => Prop): Prop = new Prop(truth || that.truth)
   def unary_! : Prop = new Prop(!truth)
 
-  /** Decides the proposition, for a proof by cases: Stainless only accepts a decision on a
-    * proposition when no value depends on it, such as a branch between two proofs. */
-  def decide: Boolean = truth
+  /** A proof by cases: `ifHolds` proves the goal when the proposition holds, and `otherwise`
+    * when it doesn't. No value can depend on a proposition, so both cases are proofs. */
+  def cases(ifHolds: => Unit, otherwise: => Unit): Unit = if (truth) ifHolds else otherwise
+
+  /** The proposition `ifHolds` when this one holds, and `otherwise` when it doesn't. */
+  def cases(ifHolds: => Prop, otherwise: => Prop): Prop = if (truth) ifHolds else otherwise
 }
 
 @ignore

@@ -2,6 +2,7 @@
 
 
 import stainless.lang._
+import stainless.lang.StaticChecks._
 
 object Composition {
   def passing_1(f: (Int) => Int, g: (Int) => Int, x: Int): Int = {

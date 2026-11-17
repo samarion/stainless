@@ -2,6 +2,7 @@
 
 import stainless._
 import lang._
+import lang.StaticChecks._
 import annotation._
 import math._
 

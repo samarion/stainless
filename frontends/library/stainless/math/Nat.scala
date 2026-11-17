@@ -6,7 +6,6 @@ package math
 import stainless.annotation._
 import stainless.lang.StaticChecks._
 
-import stainless.lang.{require, assert, Ensuring}
 @library
 final case class Nat(toBigInt: BigInt) { n =>
   require(toBigInt >= 0)

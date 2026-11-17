@@ -1,6 +1,7 @@
 import stainless.annotation._
 import stainless.collection._
 import stainless.lang._
+import stainless.lang.StaticChecks._
 
 object AbstractRefinementMap {
   def map1[A, B](l: List[A], f: A ~> B): List[B] = {

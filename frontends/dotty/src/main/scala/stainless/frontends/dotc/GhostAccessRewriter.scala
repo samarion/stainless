@@ -107,7 +107,7 @@ class GhostAccessRewriter(afterPhase: String) extends PluginPhase { self =>
         case ExAssertExpression(_, _, true) => tpd.Literal(Constant(()))
         case ExEnsuredExpression(body, _, true) =>
           transform(body) match {
-            case Apply(ExSymbol("stainless", "lang", "package$", "Ensuring"), Seq(unwrapped)) => unwrapped
+            case Apply(ExSymbol("stainless", "lang", "StaticChecks$", "Ensuring"), Seq(unwrapped)) => unwrapped
             case body => body
           }
 

@@ -1,5 +1,6 @@
 import stainless.proof._
 import stainless.lang._
+import stainless.lang.StaticChecks._
 import stainless.collection._
 
 object QuickSort {

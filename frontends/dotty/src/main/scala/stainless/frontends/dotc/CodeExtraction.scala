@@ -1477,7 +1477,7 @@ class CodeExtraction(inoxCtx: inox.Context,
 
   /** Whether Scala types a specification as a proposition, under its conversion from a boolean. */
   private def isPropBody(body: tpd.Tree): Boolean = body match {
-    case ExPropConversion(arg) if arg ne body => !(arg.tpe frozen_<:< defn.BooleanType)
+    case ExPropConversion(arg) => !(arg.tpe frozen_<:< defn.BooleanType)
     case _ => isPropSym(body.tpe.widen.typeSymbol)
   }
 
@@ -1851,6 +1851,9 @@ class CodeExtraction(inoxCtx: inox.Context,
     case ExCellSwapExpression(cell1, cell2) => xt.CellSwap(extractTree(cell1), extractTree(cell2))
 
     case ExPropConversion(arg) => extractTree(arg)
+
+    case ExPropCases(prop, ifHolds, otherwise) =>
+      xt.IfExpr(extractTree(prop), extractTree(ifHolds), extractTree(otherwise))
 
     case ExForallExpression(fun) =>
       extractTree(fun) match {

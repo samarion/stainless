@@ -1,5 +1,6 @@
 package stainless.lang
 import stainless.annotation.*
+import StaticChecks.*
 
 @library
 object Quantifiers {

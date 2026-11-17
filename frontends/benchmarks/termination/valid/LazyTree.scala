@@ -1,4 +1,5 @@
 import stainless.lang._
+import stainless.lang.StaticChecks._
 import stainless.collection._
 
 case class Alphabet(i: BigInt)

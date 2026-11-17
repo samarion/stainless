@@ -1,4 +1,5 @@
 import stainless.lang._
+import stainless.lang.StaticChecks._
 
 object ForallWithBlock {
   def g(w: BigInt) = true

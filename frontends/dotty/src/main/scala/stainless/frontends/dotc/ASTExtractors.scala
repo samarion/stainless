@@ -784,7 +784,7 @@ trait ASTExtractors {
       def unapply(tree: tpd.Tree): Option[tpd.Tree] = tree match {
         case Apply(
             ExSymbol("scala", "Predef$", "Ensuring") |
-            ExSymbol("stainless", "lang", "package$", "Ensuring"),
+            ExSymbol("stainless", "lang", "StaticChecks$", "Ensuring"),
             Seq(arg)) => Some(arg)
 
         case Apply(ExSymbol("stainless", "lang", "package$", "WrappedFloat"), Seq(arg)) => Some(arg)
@@ -1292,7 +1292,7 @@ trait ASTExtractors {
           Some((body, false))
 
         // Ditto
-        case Apply(ExSymbol("stainless", "lang", "package$", "require"), body +: _) =>
+        case Apply(ExSymbol("stainless", "lang", "StaticChecks$", "require"), body +: _) =>
           Some((body, true))
 
         case _ => None
@@ -1355,13 +1355,13 @@ trait ASTExtractors {
         case Apply(ExSymbol("scala", "Predef$", "assert"), Seq(body)) =>
           Some((body, None, false))
 
-        case Apply(ExSymbol("stainless", "lang", "package$", "assert"), Seq(body)) =>
+        case Apply(ExSymbol("stainless", "lang", "StaticChecks$", "assert"), Seq(body)) =>
           Some((body, None, true))
 
         case Apply(ExSymbol("scala", "Predef$", "assert"), Seq(body, Literal(cnst: Constant))) =>
           Some((body, Some(cnst.stringValue), false))
 
-        case Apply(ExSymbol("stainless", "lang", "package$", "assert"), Seq(body, Literal(cnst: Constant))) =>
+        case Apply(ExSymbol("stainless", "lang", "StaticChecks$", "assert"), Seq(body, Literal(cnst: Constant))) =>
           Some((body, Some(cnst.stringValue), true))
 
         case _ => None
@@ -1378,7 +1378,7 @@ trait ASTExtractors {
 
         // Ditto
         case ExCall(Some(rec),
-          ExSymbol("stainless", "lang", "package$", "Ensuring", "ensuring"),
+          ExSymbol("stainless", "lang", "StaticChecks$", "Ensuring", "ensuring"),
           _, contract +: _
         ) => Some((rec, contract, true))
 
@@ -1603,11 +1603,19 @@ trait ASTExtractors {
     }
 
     /** A conversion between a boolean and a proposition, which is a no-op: booleans are
-      * propositions, and the decisions on propositions (`decide`) are checked by Stainless. */
+      * propositions. */
     object ExPropConversion {
       def unapply(tree: tpd.Tree): Option[tpd.Tree] = tree match {
         case Apply(ExSymbol("stainless", "lang", "Prop$", "fromBoolean"), List(arg)) => Some(arg)
-        case Select(arg, name) if name.toString == "decide" && isPropSym(arg.tpe.widen.typeSymbol) => Some(arg)
+        case _ => None
+      }
+    }
+
+    /** A proof by cases on a proposition, `p.cases(ifHolds, otherwise)`. */
+    object ExPropCases {
+      def unapply(tree: tpd.Apply): Option[(tpd.Tree, tpd.Tree, tpd.Tree)] = tree match {
+        case Apply(Select(prop, name), List(ifHolds, otherwise))
+          if name.toString == "cases" && isPropSym(prop.tpe.widen.typeSymbol) => Some((prop, ifHolds, otherwise))
         case _ => None
       }
     }

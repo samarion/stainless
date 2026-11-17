@@ -2,6 +2,7 @@
 
 
 import stainless.lang._
+import stainless.lang.StaticChecks._
 
 object PositiveMap2 {
 

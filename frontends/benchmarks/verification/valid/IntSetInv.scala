@@ -4,6 +4,7 @@
  */
 
 import stainless.lang._
+import stainless.lang.StaticChecks._
 import stainless.annotation._
 
 object IntSetInv {

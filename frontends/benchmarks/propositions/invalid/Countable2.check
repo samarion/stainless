@@ -1,0 +1,8 @@
+[ Error  ] Countable2.scala:23:14: Found:    stainless.lang.Prop
+[ Error  ] Required: Boolean
+               assert(e.isBijective)
+                        ^
+[ Error  ] Countable2.scala:33:15: Found:    stainless.lang.Prop
+[ Error  ] Required: Boolean
+               if (forall((x: Empty) => false))
+                         ^

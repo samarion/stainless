@@ -1,6 +1,7 @@
 import stainless.annotation._
 import stainless.collection._
 import stainless.lang._
+import stainless.lang.StaticChecks._
 
 object AbstractRefinementMap {
 

@@ -1,0 +1,4 @@
+[ Error  ] ChooseEmpty.scala:19:15: Found:    stainless.lang.Prop
+[ Error  ] Required: Boolean
+               if (forall((x: Absurdity) => false))
+                         ^

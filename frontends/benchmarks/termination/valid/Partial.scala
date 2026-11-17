@@ -1,6 +1,7 @@
 /* From ESOP 2014, Kuwahara et al */
 
 import stainless.lang._
+import stainless.lang.StaticChecks._
 
 object Partial {
 

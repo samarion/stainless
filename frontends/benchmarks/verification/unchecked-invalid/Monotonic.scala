@@ -1,6 +1,7 @@
 /* Copyright 2009-2021 EPFL, Lausanne */
 
 import stainless.lang._
+import stainless.lang.StaticChecks._
 
 object Monotonic {
   def failling_1(f: BigInt => BigInt, g: BigInt => BigInt): BigInt => BigInt = {

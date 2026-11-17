@@ -1,5 +1,6 @@
 
 import stainless.lang._
+import stainless.lang.StaticChecks._
 import stainless.annotation._
 import scala.annotation.meta.field
 

@@ -6,5 +6,5 @@ object DecidedByField {
 
   def positive(f: BigInt => BigInt): Claim = Claim(forall((x: BigInt) => f(x) > 0), 0)
 
-  def decide(f: BigInt => BigInt): BigInt = if (positive(f).holds.decide) 1 else 0
+  def decide(f: BigInt => BigInt): BigInt = if (positive(f).holds) 1 else 0
 }

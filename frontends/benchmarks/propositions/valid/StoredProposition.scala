@@ -1,4 +1,5 @@
 import stainless.lang._
+import stainless.lang.StaticChecks._
 
 // Data can hold propositions: fields, tuples and map values can be propositions, and the
 // equality of such data is a proposition too.

@@ -11,6 +11,7 @@
   */
 
 import stainless.lang._
+import stainless.lang.StaticChecks._
 
 object Berardi3 {
   def exists[T](p: T => Boolean) = {
@@ -39,7 +40,7 @@ object Berardi3 {
   type Not[A] = A => False
 
   def cem[A](): Either[A,Not[A]] = {
-    if (exists((a: A) => true).decide)
+    if (exists((a: A) => true))
       Left(choose((a: A) => true))
     else {
       assert(forall((x: A) => false))
