@@ -179,6 +179,8 @@ class VerificationSuite extends VerificationComponentTestSuite {
       "verification/invalid/HiddenOverride",
       "verification/invalid/HOInvocations",
       "verification/invalid/i497",
+      // Princess's counterexample does not pass --check-models
+      "verification/invalid/i665",
       "verification/invalid/i1295",
       "verification/invalid/i1379c",
       "verification/invalid/InductTacticTest",
@@ -206,9 +208,6 @@ class VerificationSuite extends VerificationComponentTestSuite {
       "verification/invalid/FloatNonProperties",
       "verification/invalid/FloatNonAssociativity",
       "verification/invalid/FloatingPointFunctionsContradiction",
-
-      // false-valid/ (for greater good...)
-      "verification/false-valid/ForestNothing2",
     )
 
   private val ignoreCodegen = Set(
