@@ -20,9 +20,15 @@ object EqualityDictionariesClassesGeneric {
   import EqualityDictionariesClasses._
   def weak(l: List[Id], x: Id): Unit = {
     require(l.content.contains(x))
+    generic(l, x)
   }.ensuring(_ => l.contains(x))
+  // Holds for any equality, as it is reflexive
   def generic[T](l: List[T], x: T): Unit = {
     require(l.content.contains(x))
+    l match {
+      case Cons(h, t) => if (!(h == x)) generic(t, x)
+      case Nil() => ()
+    }
   }.ensuring(_ => l.contains(x))
   def use = generic(List(Id(1, 1)), Id(1, 1))
   def genericF[T](l: List[T], x: T): Unit = {
