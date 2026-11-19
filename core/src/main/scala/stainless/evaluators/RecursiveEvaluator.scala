@@ -19,12 +19,20 @@ abstract class RecursiveEvaluator(override val program: Program,
     case _ => None
   }
 
+  /** The context in which the interpretation of the choose `id` is evaluated.
+    *
+    * When the model leaves the value of a choose open, its interpretation can call the choose itself (the
+    * choose that encodes `box` in [[extraction.oo.TypeEncoding]] is interpreted as `x => box(x)`), so the
+    * choose is solved for within its interpretation. */
+  private def withoutInterpretation(id: Identifier, tps: Seq[Type])(using rctx: RC): RC =
+    rctx.newInterpretations(rctx.interpretations - (id -> tps))
+
   override def e(expr: Expr)(using rctx: RC, gctx: GC): Expr = expr match {
     case FunctionInvocation(id, tps, args) if liftedChoose(id).isDefined =>
       val Choose(res, _) = liftedChoose(id).get: @unchecked
       rctx.interpretations.get(res.id -> tps) match {
         case Some(l: Lambda) if l.params.size == args.size =>
-          e(l.body)(using rctx.withNewVars(l.paramSubst(args.map(e))), gctx)
+          e(l.body)(using withoutInterpretation(res.id, tps).withNewVars(l.paramSubst(args.map(e))), gctx)
         case _ => super.e(expr)
       }
 
@@ -34,7 +42,7 @@ abstract class RecursiveEvaluator(override val program: Program,
       val call = exprOps.chooseCall(c)
       rctx.interpretations.get(call.id -> call.tps) match {
         case Some(l: Lambda) if l.params.size == call.args.size =>
-          e(l.body)(using rctx.withNewVars(l.paramSubst(call.args.map(e))), gctx)
+          e(l.body)(using withoutInterpretation(call.id, call.tps).withNewVars(l.paramSubst(call.args.map(e))), gctx)
         case _ =>
           onChooseInvocation(exprOps.replaceFromSymbols(exprOps.variablesOf(c).map(v => v -> e(v)).toMap, c).asInstanceOf[Choose], rctx.interpretations)
       }
