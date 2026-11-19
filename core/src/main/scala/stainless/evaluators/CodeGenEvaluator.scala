@@ -99,9 +99,7 @@ class CodeGenEvaluator(override val program: Program,
       val res = model.interpretations.get(choose.res.id -> newTypes) match {
         case Some(Lambda(lparams, body)) if lparams.size == realParams.size =>
           val vars = (lparams zip realParams).map { case (lvd, vd) => lvd -> inputsMap(vd.toVariable) }.toMap
-          // The interpretation can call the choose itself when the model leaves its value open, so the choose
-          // is solved for within its interpretation (see `RecursiveEvaluator.withoutInterpretation`)
-          val subModel = inox.Model(model.program)(vars, model.interpretations - (choose.res.id -> newTypes))
+          val subModel = inox.Model(model.program)(vars, model.interpretations)
 
           eval(body, subModel) match {
             case EvaluationResults.Successful(result) =>
