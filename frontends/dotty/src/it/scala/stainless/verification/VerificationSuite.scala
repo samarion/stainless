@@ -90,6 +90,8 @@ class VerificationSuite extends VerificationComponentTestSuite {
       "verification/valid/BitsTricksSlow",
       "verification/valid/BooleanOps",
       "verification/valid/BVMaxInterpret",
+      "verification/valid/CakeMixins",
+      "verification/valid/CakeSelfTypes",
       "verification/valid/Composition",
       "verification/valid/ConcRope",
       "verification/valid/ConcTree",
@@ -102,6 +104,10 @@ class VerificationSuite extends VerificationComponentTestSuite {
       "verification/valid/FoolProofAdder",
       "verification/valid/FunctionMaps",
       "verification/valid/FunctionMapsObj",
+      "verification/valid/GenericInstanceTests", // Princess times out
+      "verification/valid/GenericOuters", // Princess times out
+      "verification/valid/GenericOutersInherited", // Princess times out
+      "verification/valid/GenericSortInvariants",
       "verification/valid/GodelNumbering",
       "verification/valid/Heaps",
       "verification/valid/HOInvocations2",
@@ -124,6 +130,7 @@ class VerificationSuite extends VerificationComponentTestSuite {
       "verification/valid/MapDiff",
       "verification/valid/MapGetOrElse2",
       "verification/valid/MapGetPlus",
+      "verification/valid/MemberClasses1", // Princess overflows its stack
       "verification/valid/MergeSort",
       "verification/valid/MergeSort2",
       "verification/valid/Monotonicity",
@@ -175,10 +182,14 @@ class VerificationSuite extends VerificationComponentTestSuite {
       "verification/invalid/FiniteSort",
       "verification/invalid/Float8",
       "verification/invalid/ForallAssoc",
+      "verification/invalid/GenericOuters", // Princess overflows its stack
+      "verification/invalid/GenericSortInvariants",
       "verification/invalid/Generics2",
       "verification/invalid/HiddenOverride",
       "verification/invalid/HOInvocations",
       "verification/invalid/i497",
+      // Princess's counterexample does not pass --check-models
+      "verification/invalid/i665",
       "verification/invalid/i1295",
       "verification/invalid/i1379c",
       "verification/invalid/InductTacticTest",
@@ -191,6 +202,7 @@ class VerificationSuite extends VerificationComponentTestSuite {
       "verification/invalid/LawsExampleInvalid",
       "verification/invalid/ListOperations",
       "verification/invalid/Lists",
+      "verification/invalid/MemberClassesMixing", // Princess overflows its stack
       "verification/invalid/MyTuple3",
       "verification/invalid/Nested15",
       "verification/invalid/Overrides",
@@ -206,9 +218,6 @@ class VerificationSuite extends VerificationComponentTestSuite {
       "verification/invalid/FloatNonProperties",
       "verification/invalid/FloatNonAssociativity",
       "verification/invalid/FloatingPointFunctionsContradiction",
-
-      // false-valid/ (for greater good...)
-      "verification/false-valid/ForestNothing2",
     )
 
   private val ignoreCodegen = Set(
@@ -218,6 +227,9 @@ class VerificationSuite extends VerificationComponentTestSuite {
     "verification/valid/FloatingPointFunctionProperties",
     "verification/valid/FloatsToBits",
     "verification/invalid/FloatingPointFunctionsContradiction",
+    // the evaluator takes the paradoxical sorts to be empty, so it finds an empty counterexample
+    "verification/false-valid/ParadoxInvariant",
+    "verification/false-valid/ParadoxMutualInvariant",
   )
 
   private val ignoreCheckFiles = Map(

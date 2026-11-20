@@ -71,6 +71,9 @@ lazy val commonSettings: Seq[Setting[_]] = artifactSettings ++ Seq(
     "-unchecked",
     "-feature"
   ),
+  // Stainless runs on Java 21 and later, whatever the JDK it is built with.
+  scalacOptions ++= Seq("-release", "21"),
+  javacOptions ++= Seq("--release", "21"),
 
   resolvers += ("uuverifiersStainless" at "https://eldarica.org/maven"),
 
@@ -108,6 +111,8 @@ lazy val commonSettings: Seq[Setting[_]] = artifactSettings ++ Seq(
   run / Keys.fork := true,
 
   run / javaOptions ++= Seq(
+    // The native Z3 interface loads Z3 through JNI, which Java 22+ warns about otherwise.
+    "--enable-native-access=ALL-UNNAMED",
     "-Xss256M",
     "-Xms1024M",
     "-XX:MaxMetaspaceSize=1G",
@@ -138,6 +143,8 @@ lazy val stainlessLibSettings: Seq[Setting[_]] = artifactSettings ++ Seq(
   run / Keys.fork := true,
 
   run / javaOptions ++= Seq(
+    // The native Z3 interface loads Z3 through JNI, which Java 22+ warns about otherwise.
+    "--enable-native-access=ALL-UNNAMED",
     "-Xss256M",
     "-Xms1024M",
     "-XX:+UseCodeCacheFlushing",
@@ -161,6 +168,8 @@ lazy val assemblySettings: Seq[Setting[_]] = {
       // hence the following merge strategy picks the standalone BuildInfo over the usual one.
       case "stainless/BuildInfo.class" => MergeStrategy.last
       case "stainless/BuildInfo$.class" => MergeStrategy.last
+      // The licenses of Z3, bundled with the native Z3 interface (ScalaZ3)
+      case PathList("META-INF", "z3", _*) => MergeStrategy.first
       case PathList("META-INF", xs @ _*) => MergeStrategy.discard
       // Java module descriptors (e.g. from the ASM jars pulled in by the Scala 3 compiler) are irrelevant in a fat jar
       case "module-info.class" => MergeStrategy.discard
@@ -295,6 +304,8 @@ lazy val `stainless-dotty` = (project in file("frontends/dotty"))
     # Prepend the default so explicit JVM options can override it.
     java_args=("-XX:+UseCompactObjectHeaders" "${java_args[@]}")
   fi
+  # The native Z3 interface loads Z3 through JNI, which Java 22+ warns about otherwise.
+  java_args=("--enable-native-access=ALL-UNNAMED" "${java_args[@]}")
   residual_args=("$@")
 }
 """,
@@ -304,7 +315,9 @@ lazy val `stainless-dotty` = (project in file("frontends/dotty"))
     assemblyPackageScala / assembleArtifact := true,
     assembly / assemblyExcludedJars := {
       val cp = (assembly / fullClasspath).value
-      // Don't include scalaz3 dependency because it is OS dependent
+      // The native Z3 interface (ScalaZ3, with the native libraries of Z3 for all platforms) would
+      // add 55MB to the compiler plugin, which then falls back to the SMT-LIB solvers (as before,
+      // when ScalaZ3 was platform-dependent). stainless-dotty-standalone includes it.
       cp filter {_.data.getName.startsWith("scalaz3")}
     },
   )
@@ -332,10 +345,9 @@ lazy val `stainless-dotty-standalone` = (project in file("frontends") / "stainle
     assembly / assemblyJarName := (name.value + "-" + version.value + ".jar"),
     Runtime / unmanagedJars := (`stainless-dotty` / Runtime / unmanagedJars).value,
     assemblyPackageScala / assembleArtifact := true,
-    assembly / assemblyExcludedJars := {
-      val cp = (assembly / fullClasspath).value
-      cp filter {_.data.getName.startsWith("scalaz3")}
-    },
+    // The native Z3 interface (ScalaZ3) is platform-independent: it bundles the native libraries of
+    // Z3 for all platforms, so it is part of the standalone jar.
+    assembly / assemblyExcludedJars := Seq(),
   )
   .dependsOn(`stainless-dotty`)
 

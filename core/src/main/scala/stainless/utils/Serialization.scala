@@ -96,6 +96,7 @@ class StainlessSerializer(override val trees: ast.Trees, serializeProducts: Bool
       stainlessClassSerializer[InlineInvariant.type](166),
       stainlessClassSerializer[Lazy.type]           (167),
       stainlessClassSerializer[Template.type]       (169),
+      stainlessClassSerializer[OuterAccessor.type]  (274),
     )
 }
 
@@ -106,9 +107,9 @@ class XLangSerializer(override val trees: extraction.xlang.Trees, serializeProdu
   /** An extension to the set of registered classes in the `StainlessSerializer`.
     * occur within Stainless programs.
     *
-    * The new identifiers in the mapping range from 180 to 262.
+    * The new identifiers in the mapping range from 180 to 273.
     *
-    * NEXT ID: 263
+    * NEXT ID: 274
     */
   override protected def classSerializers: Map[Class[?], Serializer[?]] =
     super.classSerializers ++ Map(
@@ -218,6 +219,14 @@ class XLangSerializer(override val trees: extraction.xlang.Trees, serializeProdu
       stainlessClassSerializer[ModuleDef]       (221),
       stainlessClassSerializer[UnknownType]     (238),
       stainlessClassSerializer[StrictBV.type]   (256),
+      stainlessClassSerializer[PathType]        (266),
+      stainlessClassSerializer[RefEquals]     (267),
+      stainlessClassSerializer[PathClassConstructor](268),
+      stainlessClassSerializer[PathClassPattern](269),
+      stainlessClassSerializer[IsMemberOf]      (270),
+      stainlessClassSerializer[IsObject.type]   (271),
+      stainlessClassSerializer[IsTrait.type]    (272),
+      stainlessClassSerializer[SelfType]        (273),
     )
 }
 

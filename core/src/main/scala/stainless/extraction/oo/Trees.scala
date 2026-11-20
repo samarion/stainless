@@ -29,15 +29,25 @@ trait Trees extends innerfuns.Trees with Definitions { self =>
 
     protected def computeTpe(stripRefinements: Boolean)(using s: Symbols): Type = expr.getTpe(stripRefinements).stripToplevelRefinement match {
       case ct: ClassType =>
-        field.map(_.tpe).orElse((s.lookupFunction(selector), s.lookupClass(ct.id, ct.tps)) match {
+        val memberSubst = memberTypeSubst(expr)
+        field.map(vd => typeOps.instantiateType(fieldType(expr, ct, vd), memberSubst)).orElse((s.lookupFunction(selector), s.lookupClass(ct.id, ct.tps)) match {
           case (Some(fd), Some(tcd)) =>
-            Some(typeOps.instantiateType(fd.returnType, (tcd.cd.tparams.map(_.tp) zip tcd.tps).toMap))
+            Some(typeOps.instantiateType(fd.returnType, memberSubst ++ (tcd.cd.tparams.map(_.tp) zip tcd.tps).toMap))
           case _ =>
             None
-        }).getOrElse(Untyped)
+        }).map(_.getTpe(stripRefinements)).getOrElse(Untyped)
       case tp =>
         Untyped
     }
+  }
+
+  /** The type of the field `vd` of `ct` as seen from `expr`: field types may refer to the previous fields (see
+    * `xlang.MemberClasses`), and to `this` before `MethodLifting` (see `methods.Trees`).
+    */
+  protected def fieldType(expr: Expr, ct: ClassType, vd: ValDef)(using s: Symbols): Type = {
+    val fields = ct.lookupClass.toSeq.flatMap(_.fields).takeWhile(_.id != vd.id)
+    if (fields.isEmpty) vd.tpe
+    else typeOps.replaceFromSymbols(fields.map(f => f -> (ClassSelector(expr, f.id).copiedFrom(expr): Expr)).toMap, vd.tpe)
   }
 
   /** $encodingof `expr.isInstanceOf[tpe]` */
@@ -167,6 +177,13 @@ trait Trees extends innerfuns.Trees with Definitions { self =>
     case ta: TypeApply => widenTypeParameter(ta.upperBound)
     case tpe => tpe
   }
+
+  /** The instantiation of the type parameters, beyond those of its class, that the members of `e` mention.
+    *
+    * In xlang, the members of a member class may mention the type parameters of its enclosing class, which
+    * are instantiated by the outer instance (see [[xlang.MemberClasses]]).
+    */
+  protected def memberTypeSubst(e: Expr)(using Symbols): Map[TypeParameter, Type] = Map.empty
 
   protected def getClassType(tpe: Typed, tpes: Typed*)(using Symbols): Type =
     widenTypeParameter(tpe.getType) match {

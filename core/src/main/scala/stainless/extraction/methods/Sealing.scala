@@ -127,10 +127,14 @@ class Sealing(override val s: Trees)(override val t: s.type)
       // We lookup the latest non-final methods, and split them in three groups:
       // normal methods, setters, and getters
       val lnfm = context.lnfm(cd).toSeq
+      // The accessors may be inherited, so `this` is that of `cd` or of one of its ancestors
+      val selfIds = cd.ancestors.map(_.id).toSet + cd.id
       val (accessors, methods) = lnfm.partition { id =>
         val fd = symbols.getFunction(id)
         fd.isAccessor && !typeOps.exists {
-          case TypeSelect(Some(This(ct)), _) => ct.id == cd.id
+          case TypeSelect(Some(This(ct)), _) => selfIds(ct.id)
+          // e.g. the type `{ x: C | x.outer eq this.outer }` of a member class `C` (see `xlang.MemberClasses`)
+          case RefinementType(_, pred) => exprOps.exists { case This(ct) => selfIds(ct.id) case _ => false } (pred)
           case _ => false
         } (fd.returnType) // We don't want to add fields for vals which are path-dependent on `this`,
                           // because this is invalid in Scala (ie. fields cannot refer to `this`).
@@ -179,6 +183,12 @@ class Sealing(override val s: Trees)(override val t: s.type)
         } else {
           ValDef(id, tpe, flags).copiedFrom(fd)
         }
+      }
+
+      // The dummy subclass assumes the postconditions of `cd`, which may be unsatisfiable, so its
+      // invariant `inhabited[T]()` lets the solver make it empty
+      val hasContracts = methods.exists { id =>
+        deconstructSpecs(symbols.getFunction(id).fullBody)._1.exists(_.isInstanceOf[Postcondition])
       }
 
       // Create a dummy subclass for the current class
@@ -254,7 +264,31 @@ class Sealing(override val s: Trees)(override val t: s.type)
         )
       }
 
-      ((newCd, Some(dummyClass), dummyFunOverrides ++ newAccessors, dummyTypeDefOverrides), ())
+      val inhabitation = if (!hasContracts) Seq() else {
+        val inhabitedTps = freshenTypeParams(cd.typeArgs)
+        val inhabited = new FunDef(
+          FreshIdentifier(cd.id.name + "Inhabited"),
+          inhabitedTps.map(tp => TypeParameterDef(tp).copiedFrom(tp)),
+          Seq(),
+          BooleanType().setPos(cd),
+          NoTree(BooleanType()).setPos(cd),
+          Seq(Extern, Synthetic)
+        ).setPos(cd)
+
+        val inv = new FunDef(
+          ast.SymbolIdentifier("inv"),
+          Seq(),
+          Seq(),
+          BooleanType().setPos(cd),
+          FunctionInvocation(inhabited.id, typeArgs, Seq()).setPos(cd),
+          // the dummy subclass is never built, so its invariant is never checked
+          Seq(IsInvariant, Synthetic, DropVCs, IsMethodOf(dummyClass.id))
+        ).setPos(cd)
+
+        Seq(inhabited, context.addPurityAnnotations(inv))
+      }
+
+      ((newCd, Some(dummyClass), dummyFunOverrides ++ newAccessors ++ inhabitation, dummyTypeDefOverrides), ())
     }
     else ((cd, None, Seq.empty, Seq.empty), ())
   }
