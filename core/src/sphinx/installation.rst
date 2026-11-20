@@ -8,10 +8,10 @@ Installing Stainless
 General Requirement
 -------------------
 
-- Java 17 JRE It suffices to have headless OpenJDK JRE 17 (e.g. one that one
-  gets with ``apt install openjdk-17-jre-headless`` on Debian/Ubuntu). Make sure
-  that ``java -version`` reports a version starting with 1.17, such as ``openjdk
-  version "1.17`` or ``java version "1.17``.
+- Java 21 JRE or later. It suffices to have headless OpenJDK JRE 21 (e.g. one
+  that one gets with ``apt install openjdk-21-jre-headless`` on Debian/Ubuntu).
+  Make sure that ``java -version`` reports version 21 or later, such as
+  ``openjdk version "21.0.5"``.
 
 Stainless bundles Scala 3 compiler front-end and runs it before it starts
 compilation.
@@ -43,7 +43,7 @@ In a terminal, you can type:
 
   $ sudo snap install stainless --edge
 
-This exposes the ``stainless`` command and comes packaged with JDK 17 and z3,
+This exposes the ``stainless`` command and comes packaged with JDK 21 and z3,
 cvc5, and princess as SMT solvers. The edge build follows the latest commit on
 the ``main`` branch.
 
@@ -123,7 +123,10 @@ Use Standalone Release
 1. Download the latest Stainless release from the `Releases page on GitHub
    <https://github.com/epfl-lara/stainless/releases>`__, under the **Assets**
    section. Make sure to pick the appropriate ZIP for your operating system. The
-   releases are bundled with z3 5.4.0+ and cvc5 1.4.2+.
+   releases are bundled with z3 5.4.1+ and cvc5 1.4.2+. They also include the
+   native Z3 interface (the default solver, ``nativez3``) for Linux (x64 and
+   ARM64, glibc 2.39 or later), macOS (ARM64) and Windows (x64). Elsewhere,
+   Stainless falls back to the bundled z3 binary.
 
 2. Unzip the file you just downloaded to a directory.
 
@@ -430,7 +433,7 @@ Build from Source on Linux & macOS
 
 To build Stainless from source, you need:
 
-1. `Java Development Kit 17 <https://openjdk.org/projects/jdk/17/>`__
+1. `Java Development Kit 21 <https://openjdk.org/projects/jdk/21/>`__ or later
 2. `sbt 1.6.0+ <https://www.scala-sbt.org>`__
 3. `git <https://git-scm.com>`__
 
@@ -466,7 +469,7 @@ the execution, such as passing JVM arguments or system properties:
 
 .. code-block:: bash
 
-  $ stainless -Dscalaz3.debug.load=true -J-Xmx6G --help
+  $ stainless -Dz3.nativeCacheDir=/tmp/z3-native -J-Xmx6G --help
 
 Note that Stainless is organized as a structure of several projects. The main
 project lives in ``core`` while the Scala 3 frontend can be found in

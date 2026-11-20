@@ -15,6 +15,7 @@ import Denotations._
 import StdNames._
 import Names._
 import util.SourcePosition
+import transform.TypeTestsCasts
 
 import scala.collection.mutable
 
@@ -609,14 +610,19 @@ class FragmentChecker(inoxCtx: inox.Context)(using override val dottyCtx: DottyC
           }
 
           val template = cd.rhs.asInstanceOf[tpd.Template]
-          val parents = template.parents.map(_.tpe).filterNot(isIgnored)
-          if (parents.length > 1) {
-            reportError(tree.sourcePos, s"Stainless supports only simple type hierarchies: Classes can only inherit from a single class/trait")
-          }
           traverse(template.constr)
           template.body.foreach {
-            case nested @ ExClassDef() =>
-              reportError(nested.sourcePos, "Classes can only be defined at the top-level, within objects, or within methods")
+            case nested @ ExClassDef() if sym `is` ModuleClass =>
+              reportError(nested.sourcePos, "Classes cannot be defined within case objects")
+            case nested @ ExClassDef() if !sym.owner.isClass =>
+              reportError(nested.sourcePos, "Classes cannot be defined within local classes")
+            case nested @ ExClassDef() if sym `is` Case =>
+              // Case classes compare structurally, while outer instances are compared by reference
+              reportError(nested.sourcePos, "Classes cannot be defined within case classes")
+            case nested @ ExClassDef() if nested.symbol `is` ModuleClass =>
+              reportError(nested.sourcePos, "Objects cannot be defined within classes or traits")
+            case nested @ ExObjectDef() if !(nested.symbol `is` Synthetic) =>
+              reportError(nested.sourcePos, "Objects cannot be defined within classes or traits")
             case tr => traverse(tr)
           }
 
@@ -648,12 +654,17 @@ class FragmentChecker(inoxCtx: inox.Context)(using override val dottyCtx: DottyC
           }
           traverseChildren(tree)
 
+        // A type test that the JVM cannot do, on a type parameter or on the type arguments of a class, is erased:
+        // its result at runtime is not the one Stainless reasons about. These are the tests scalac warns about.
+        case TypeApply(Select(expr, _), List(tpt)) if sym == defn.Any_isInstanceOf =>
+          val why = TypeTestsCasts.whyUncheckable(expr.tpe, tpt.tpe, tree.span, trustTypeApplication = false)
+          if (why.nonEmpty)
+            reportError(tree.sourcePos, s"The type test for ${tpt.tpe.show} cannot be checked at runtime because $why.")
+          traverseChildren(tree)
+
         case Apply(fun, args) if BigInt_ApplyMethods(sym) =>
           // `BigInt(_)` accepts a literal, or an `Int`/`Long` (a bitvector-to-integer conversion).
-          def okArg(a: tpd.Tree): Boolean =
-            a.isInstanceOf[tpd.Literal] ||
-            a.tpe.widenDealias.typeSymbol == defn.IntClass ||
-            a.tpe.widenDealias.typeSymbol == defn.LongClass
+          def okArg(a: tpd.Tree): Boolean = a.isInstanceOf[tpd.Literal] || hasIntOrLongType(a)
           if (args.size != 1 || !okArg(args.head))
             reportError(args.head.sourcePos, "Only literal, Int or Long arguments are allowed for BigInt.")
           traverseChildren(tree)
