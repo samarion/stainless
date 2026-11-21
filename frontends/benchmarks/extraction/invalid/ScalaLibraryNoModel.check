@@ -1,0 +1,3 @@
+[ Error  ] ScalaLibraryNoModel.scala:5:42: Method `sorted` of `scala.collection.immutable.List` has no model in the Stainless library
+             def sorted(xs: List[Int]): List[Int] = xs.sorted
+                                                    ^^^^^^^^^

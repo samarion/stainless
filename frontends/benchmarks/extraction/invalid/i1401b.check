@@ -1,3 +1,44 @@
-[ Error  ] i1401b.scala:7:21: Scala API `scala.collection.immutable.Set` is not directly supported, please use `stainless.lang.Set` instead.
-             case class Set[T](s: ScalaSet[T])
-                               ^^^^^^^^^^^^^^
+[ Error  ] i1401b.scala:7:14: Vec depends on missing dependencies:
+             case class Vec[T](s: ScalaVector[T])
+                        ^
+[ Error  ] Class Vector
+[ Error  ] Hint: this class comes from the Scala standard library and is currently not supported.
+[ Error  ] i1401b.scala:7:24:
+             case class Vec[T](s: ScalaVector[T])
+                                  ^^^^^^^^^^^^^^
+[ Error  ]
+[ Error  ] i1401b.scala:7:3: copy depends on missing dependencies:
+             case class Vec[T](s: ScalaVector[T])
+             ^
+[ Error  ] Class Vector
+[ Error  ] Hint: this class comes from the Scala standard library and is currently not supported.
+[ Error  ] i1401b.scala:7:21:
+             case class Vec[T](s: ScalaVector[T])
+                               ^
+[ Error  ]
+[ Error  ] i1401b.scala:7:38: copy$default$1 depends on missing dependencies:
+             case class Vec[T](s: ScalaVector[T])
+                                                ^
+[ Error  ] Class Vector
+[ Error  ] Hint: this class comes from the Scala standard library and is currently not supported.
+[ Error  ] i1401b.scala:7:19:
+             case class Vec[T](s: ScalaVector[T])
+                             ^
+[ Error  ]
+[ Error  ] i1401b.scala:7:21: s depends on missing dependencies:
+             case class Vec[T](s: ScalaVector[T])
+                               ^
+[ Error  ] Class Vector
+[ Error  ] Hint: this class comes from the Scala standard library and is currently not supported.
+[ Error  ] i1401b.scala:7:24:
+             case class Vec[T](s: ScalaVector[T])
+                                  ^^^^^^^^^^^^^^
+[ Error  ]
+[ Error  ] Hint: to use a class reported as unknown, you may create a new class wrapping it in a field, annotated with @extern.
+[ Error  ] For instance:
+[ Error  ]     import stainless.annotation.extern
+[ Error  ]     class Vector(@extern underlying: scala.collection.immutable.Vector) {
+[ Error  ]       // ... methods
+[ Error  ]     }
+[ Error  ] See https://epfl-lara.github.io/stainless/wrap.html for more information.
+[ Fatal  ] Cannot recover from missing dependencies

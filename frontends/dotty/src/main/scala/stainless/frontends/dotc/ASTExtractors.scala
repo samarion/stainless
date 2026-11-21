@@ -171,6 +171,97 @@ trait ASTExtractors {
   protected lazy val covConsSymbol = classFromName("stainless.covcollection.::")
   protected lazy val covNilSymbol  = moduleFromName("stainless.covcollection.Nil").moduleClass
 
+  /** Classes and objects of the Scala standard library that are extracted as their model in the
+    * Stainless library. The model has the members of the Scala class it stands for, under the
+    * same names and with the same shape, and they are the ones that get verified.
+    */
+  protected lazy val libraryModels: Map[Symbol, Symbol] = {
+    def classModel(scala: String, model: String) = Seq(
+      classFromName(scala) -> classFromName(model),
+      classFromName(scala).companionModule.moduleClass -> classFromName(model).companionModule.moduleClass
+    )
+    def objectModel(scala: String, model: String) = Seq(
+      moduleFromName(scala).moduleClass -> moduleFromName(model).moduleClass
+    )
+    (
+      classModel("scala.Option", "stainless.covcollection.Option") ++
+      classModel("scala.Some", "stainless.covcollection.Some") ++
+      objectModel("scala.None", "stainless.covcollection.None") ++
+      classModel("scala.collection.immutable.List", "stainless.covcollection.List") ++
+      classModel("scala.collection.immutable.::", "stainless.covcollection.::") ++
+      objectModel("scala.collection.immutable.Nil", "stainless.covcollection.Nil") ++
+      // A sequence is a list: the model has no other implementation of `Seq`
+      classModel("scala.collection.immutable.Seq", "stainless.covcollection.List") ++
+      classModel("scala.collection.Seq", "stainless.covcollection.List") ++
+      classModel("scala.util.Either", "stainless.covcollection.Either") ++
+      classModel("scala.util.Left", "stainless.covcollection.Left") ++
+      classModel("scala.util.Right", "stainless.covcollection.Right")
+    ).filter((scala, model) => scala.exists && model.exists).toMap
+  }
+
+  /** Whether `sym` is a value that stands for a Scala standard library object that has a model,
+    * such as `scala.Nil`, which is a value of the `scala` package and not the object itself.
+    */
+  protected def isLibraryModelAlias(sym: Symbol): Boolean =
+    sym.exists && sym.isTerm && !(sym `is` Module) && !(sym `is` Method) && sym.isStableMember &&
+    (sym.owner eq defn.ScalaPackageClass.info.decl(nme.PACKAGE).symbol.moduleClass) &&
+    (sym.info.widen.classSymbol `is` ModuleClass) && !sym.info.widen.classSymbol.companionClass.exists &&
+    libraryModels.contains(sym.info.widen.classSymbol)
+
+  /** Whether `sym` is a Scala standard library class or object that has a model. */
+  protected def hasLibraryModel(sym: Symbol): Boolean = libraryModels.contains(sym)
+
+  /** The symbol of the Stainless library that models `sym`, or `sym` itself when it doesn't belong
+    * to a modelled class. A member is looked up by name in the model of the class of `receiver`
+    * when there is one, since most methods of the Scala collections are inherited from traits
+    * that have no model of their own. Returns `NoSymbol` when the model has no such member.
+    */
+  protected def libraryModelOf(sym: Symbol, receiver: Option[Type] = None): Symbol = {
+    def sameShape(model: Symbol): Boolean = {
+      def shape(s: Symbol) = (s.info.typeParams.size, s.info.paramInfoss.map(_.size).filter(_ > 0))
+      shape(sym) == shape(model)
+    }
+
+    if (!sym.exists) sym
+    else libraryModels.get(sym) match {
+      case Some(model) => model
+      case None if (sym `is` Module) && libraryModels.contains(sym.moduleClass) =>
+        libraryModels(sym.moduleClass).sourceModule
+      case None if sym.owner.isClass =>
+        val owner = receiver
+          .map(_.widenDealias.classSymbol)
+          .filter(libraryModels.contains)
+          .orElse(Some(sym.owner).filter(libraryModels.contains))
+        owner.map(libraryModels) match {
+          case None => sym
+          case Some(model) if sym.isPrimaryConstructor => model.primaryConstructor
+          case Some(model) if sym.isType && (sym `is` TypeParam) =>
+            val index = sym.owner.typeParams.indexOf(sym)
+            if (index >= 0 && index < model.typeParams.size) model.typeParams(index) else NoSymbol
+          case Some(model) =>
+            model.info.member(sym.name).alternatives.map(_.symbol).filter(sameShape) match {
+              case List(member) => member
+              case _ => NoSymbol
+            }
+        }
+      case None => sym
+    }
+  }
+
+  protected lazy val setModuleSym = moduleFromName("stainless.lang.Set").moduleClass
+  /** Whether `tpe` is the result of `withFilter` on a Scala set. */
+  def isScalaSetWithFilter(tpe: Type): Boolean = tpe.widenDealias match {
+    case AppliedType(tr: TypeRef, Seq(_, cc)) =>
+      tr.symbol == classFromName("scala.collection.WithFilter") && scalaSetSyms.contains(cc.typeSymbol)
+    case _ => false
+  }
+
+  // The Scala sets and maps are the built-in sets and maps of Stainless, like `stainless.lang.Set` and `Map`
+  protected lazy val scalaSetSyms: Set[Symbol] =
+    Set(classFromName("scala.collection.immutable.Set"), classFromName("scala.collection.Set"))
+  protected lazy val scalaMapSyms: Set[Symbol] =
+    Set(classFromName("scala.collection.immutable.Map"), classFromName("scala.collection.Map"))
+
   protected lazy val optionClassSym     = classFromName("scala.Option")
   protected lazy val arraySym           = classFromName("scala.Array")
   protected lazy val someClassSym       = classFromName("scala.Some")
@@ -235,11 +326,19 @@ trait ASTExtractors {
   }
 
   def isSetSym(sym: Symbol) : Boolean = {
-    getResolvedTypeSym(sym) == setSym
+    val resolved = getResolvedTypeSym(sym)
+    resolved == setSym || scalaSetSyms.contains(resolved)
   }
 
   def isMapSym(sym: Symbol) : Boolean = {
-    getResolvedTypeSym(sym) == mapSym
+    val resolved = getResolvedTypeSym(sym)
+    resolved == mapSym || scalaMapSyms.contains(resolved)
+  }
+
+  /** Whether `tpe` is a Scala set or map, which are extracted as the built-in set and map types. */
+  def isScalaSetOrMap(tpe: Type): Boolean = {
+    val sym = tpe.widenDealias.classSymbol
+    scalaSetSyms.contains(sym) || scalaMapSyms.contains(sym)
   }
 
   def isMutableMapSym(sym: Symbol) : Boolean = {
@@ -1622,17 +1721,29 @@ trait ASTExtractors {
     }
 
     object ExFiniteMap {
-      def unapply(tree: tpd.Apply): Option[(tpd.Tree, tpd.Tree, List[tpd.Tree])] = tree match {
+      def unapply(tree: tpd.Tree): Option[(tpd.Tree, tpd.Tree, List[tpd.Tree])] = tree match {
         case Apply(TypeApply(ExSymbol("stainless", "lang", "Map$", "apply"), List(tptFrom, tptTo)), args) =>
           Some((tptFrom, tptTo, args))
+        case Apply(TypeApply(fun @ Select(qual, _), List(tptFrom, tptTo)), args)
+        if fun.symbol.name == nme.apply && scalaMapSyms.contains(qual.tpe.widen.classSymbol.companionClass) =>
+          Some((tptFrom, tptTo, args))
+        case TypeApply(fun @ Select(qual, _), List(tptFrom, tptTo))
+        if fun.symbol.name.toString == "empty" && scalaMapSyms.contains(qual.tpe.widen.classSymbol.companionClass) =>
+          Some((tptFrom, tptTo, Nil))
         case _ => None
       }
     }
 
     object ExFiniteSet {
-      def unapply(tree: tpd.Apply): Option[(tpd.Tree,List[tpd.Tree])] = tree match {
+      def unapply(tree: tpd.Tree): Option[(tpd.Tree,List[tpd.Tree])] = tree match {
         case Apply(TypeApply(ExSymbol("stainless", "lang", "Set$", "apply"), List(tpt)), args) =>
           Some(tpt, args)
+        case Apply(TypeApply(fun @ Select(qual, _), List(tpt)), args)
+        if fun.symbol.name == nme.apply && scalaSetSyms.contains(qual.tpe.widen.classSymbol.companionClass) =>
+          Some(tpt, args)
+        case TypeApply(fun @ Select(qual, _), List(tpt))
+        if fun.symbol.name.toString == "empty" && scalaSetSyms.contains(qual.tpe.widen.classSymbol.companionClass) =>
+          Some(tpt, Nil)
         case _ => None
       }
     }
@@ -1730,6 +1841,18 @@ trait ASTExtractors {
     object ExCovListLiteral {
       def unapply(tree: tpd.Apply): Option[(tpd.Tree, List[tpd.Tree])] = tree match {
         case Apply(TypeApply(ExSymbol("stainless", "covcollection", "List$", "apply"), List(tpt)), args) =>
+          Some((tpt, args))
+        case _ =>
+          None
+      }
+    }
+
+    /** Matches the construct scala.List[tpe](a, b, ...) and returns tpe and arguments */
+    object ExScalaListLiteral {
+      def unapply(tree: tpd.Apply): Option[(tpd.Tree, List[tpd.Tree])] = tree match {
+        case Apply(TypeApply(fun @ Select(qual, _), List(tpt)), args)
+        if fun.symbol.name == nme.apply &&
+           libraryModels.get(qual.tpe.widen.classSymbol).contains(covListSymbol.companionModule.moduleClass) =>
           Some((tpt, args))
         case _ =>
           None

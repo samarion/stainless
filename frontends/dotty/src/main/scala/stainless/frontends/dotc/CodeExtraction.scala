@@ -43,7 +43,8 @@ class CodeExtraction(inoxCtx: inox.Context,
   given givenDebugSection: inox.DebugSection = frontend.DebugSectionExtraction
 
   private def getIdentifier(sym: Symbol): SymbolIdentifier = {
-    symbolMapping.fetch(sym, SymbolMapping.FetchingMode.Plain)
+    val model = libraryModelOf(sym)
+    symbolMapping.fetch(if (model.exists) model else sym, SymbolMapping.FetchingMode.Plain)
   }
 
   private def getFieldAccessorIdentifier(sym: Symbol): SymbolIdentifier = {
@@ -1176,6 +1177,14 @@ class CodeExtraction(inoxCtx: inox.Context,
           outOfSubsetError(p, s"Unsupported pattern: ${p.show}")
       }
 
+    case id @ (Ident(_) | Select(_, _)) if isLibraryModelAlias(id.symbol) =>
+      extractType(id.tpe.widen)(using dctx.setResolveTypes(true), p.sourcePos) match {
+        case ct: xt.ClassType =>
+          (xt.ClassPattern(binder, ct, Seq()).setPos(p.sourcePos), dctx)
+        case _ =>
+          outOfSubsetError(p, s"Unsupported pattern: ${p.show}")
+      }
+
     case id @ Ident(_) if id.symbol `isOneOf` (Case | Module) =>
       extractType(id)(using dctx.setResolveTypes(true)) match {
         case ct: xt.ClassType =>
@@ -2008,6 +2017,12 @@ class CodeExtraction(inoxCtx: inox.Context,
         case e => (xt.TupleSelect(e, 1).setPos(e), xt.TupleSelect(e, 2).setPos(e))
       }, extractType(tpt))
 
+    case id @ (Ident(_) | Select(_, _)) if isLibraryModelAlias(id.symbol) =>
+      extractType(id.tpe.widen)(using dctx, tr.sourcePos) match {
+        case ct: xt.ClassType => xt.ClassConstructor(ct, Seq.empty)
+        case _ => outOfSubsetError(tr, "Unexpected object " + tr.show)
+      }
+
     case ExClassConstruction(tpe, args) if isMemberClass(tpe.classSymbol) =>
       given SourcePosition = tr.sourcePos
       val cls = tpe.classSymbol
@@ -2093,6 +2108,8 @@ class CodeExtraction(inoxCtx: inox.Context,
     case ExListLiteral(tpt, args) => invariantListLiteral(tpt, args, tr.sourcePos)
 
     case ExCovListLiteral(tpt, args) => covariantListLiteral(tpt, args, tr.sourcePos)
+
+    case ExScalaListLiteral(tpt, args) => covariantListLiteral(tpt, args, tr.sourcePos)
 
     case ExImplies(lhs, rhs) =>
       xt.Implies(extractTree(lhs), extractTree(rhs))
@@ -2261,7 +2278,13 @@ class CodeExtraction(inoxCtx: inox.Context,
       )
   }
 
-  private def extractCall(tr: tpd.Tree, rec: Option[tpd.Tree], sym: Symbol, tps: Seq[tpd.Tree], args: Seq[tpd.Tree])(using dctx: DefContext): xt.Expr = {
+  private def extractCall(tr: tpd.Tree, rec: Option[tpd.Tree], calledSym: Symbol, tps: Seq[tpd.Tree], args: Seq[tpd.Tree])(using dctx: DefContext): xt.Expr = {
+    // A method of a Scala class that has a model in the Stainless library is a call to the model's method
+    val sym = libraryModelOf(calledSym, rec.map(_.tpe))
+    if (!sym.exists) {
+      val owner = rec.map(_.tpe.widenDealias.classSymbol).filter(hasLibraryModel).getOrElse(calledSym.owner)
+      outOfSubsetError(tr, s"Method `${calledSym.name.decode}` of `${owner.fullName.show}` has no model in the Stainless library")
+    }
     if (isSyntheticArrayAccessor(sym))
       outOfSubsetError(tr, s"Stainless does not support references to the synthetic accessor `${sym.name.toString}`")
     rec match {
@@ -2395,6 +2418,28 @@ class CodeExtraction(inoxCtx: inox.Context,
 
         case (xt.MutableMapType(_, _), "duplicate", Seq()) =>
           xt.MutableMapDuplicate(extractTree(lhs))
+
+        // The higher-order methods of a Scala set are the extension methods of `stainless.lang.Set`
+        case (xt.SetType(base), name @ ("exists" | "forall" | "map" | "flatMap" | "filter" | "withFilter" | "nonEmpty"), _)
+        if isScalaSetOrMap(lhs.tpe) || isScalaSetWithFilter(lhs.tpe) =>
+          val ext = setModuleSym.info.decl(termName(name)).symbol
+          xt.FunctionInvocation(getIdentifier(ext), base +: tps.map(extractType), extractTree(lhs) +: args.map(extractTree))
+
+        // A Scala map returns a Scala option, whose model is not the option that built-in maps contain
+        case (xt.MapType(_, xt.ClassType(_, Seq(to))), "get", Seq(rhs)) if isScalaSetOrMap(lhs.tpe) =>
+          val pos = tr.sourcePos
+          val someTpe = xt.ClassType(getIdentifier(someSymbol), Seq(to)).setPos(pos)
+          val scalaSome = libraryModelOf(defn.SomeClass)
+          val scalaNone = libraryModelOf(defn.NoneModule.moduleClass)
+          val vd = xt.ValDef(FreshIdentifier("res", true), xt.ClassType(getIdentifier(optionSymbol), Seq(to)).setPos(pos)).setPos(pos)
+          xt.Let(vd, xt.MapApply(extractTree(lhs), extractTree(rhs)).setPos(pos), xt.IfExpr(
+            xt.IsInstanceOf(vd.toVariable, someTpe).setPos(pos),
+            xt.ClassConstructor(xt.ClassType(getIdentifier(scalaSome), Seq(to)).setPos(pos), Seq(xt.ClassSelector(
+              xt.AsInstanceOf(vd.toVariable, someTpe).setPos(pos),
+              getIdentifier(someSymbol.info.decl(termName("v")).symbol)
+            ).setPos(pos))).setPos(pos),
+            xt.ClassConstructor(xt.ClassType(getIdentifier(scalaNone), Seq.empty).setPos(pos), Seq.empty).setPos(pos)
+          ).setPos(pos))
 
         case (xt.MapType(_, _), "get", Seq(rhs)) =>
           xt.MapApply(extractTree(lhs), extractTree(rhs))
@@ -2926,6 +2971,11 @@ class CodeExtraction(inoxCtx: inox.Context,
       case tpe if isStringSym(tpe.typeSymbol)        => restoreRefinements(xt.StringType())
       case tpe if isWrappedFloatSym(tpe.typeSymbol)  => restoreRefinements(xt.Float32Type())
       case tpe if isWrappedDoubleSym(tpe.typeSymbol) => restoreRefinements(xt.Float64Type())
+
+      // The result of `withFilter` on a Scala set, which a `for` comprehension with a guard goes through
+      case tpe if isScalaSetWithFilter(tpe) =>
+        val AppliedType(_, Seq(tp, _)) = tpe.widenDealias: @unchecked
+        xt.SetType(extractType(tp))
 
       case AppliedType(tr: TypeRef, Seq(tp)) if isSetSym(tr.symbol) =>
         // We know the underlying is a set, but it may be hidden under an alias

@@ -360,6 +360,56 @@ Additionally, the following functions for Sets are provided in the
 +-----------------------------------------------------------+-------------------------------------------+
 
 
+Scala Standard Library
+----------------------
+
+Some classes of the Scala standard library can be used directly. Stainless
+extracts them as their *model*, a class of the Stainless library that has the
+same members, and it is the model that gets verified.
+
++--------------------------------------------------+------------------------------------------+
+| Scala class                                      | Model                                    |
++==================================================+==========================================+
+| ``Option``, ``Some``, ``None``                   | ``stainless.covcollection.Option``       |
++--------------------------------------------------+------------------------------------------+
+| ``List``, ``::``, ``Nil``, ``Seq``               | ``stainless.covcollection.List``         |
++--------------------------------------------------+------------------------------------------+
+| ``Either``, ``Left``, ``Right``                  | ``stainless.covcollection.Either``       |
++--------------------------------------------------+------------------------------------------+
+
+.. code-block:: scala
+
+  def sum(xs: List[BigInt]): BigInt = xs match {
+    case Nil => BigInt(0)
+    case x :: rest => x + sum(rest)
+  }
+
+  def first(xs: List[BigInt]): BigInt = {
+    require(xs.nonEmpty)
+    xs.head // the precondition of the model's `head`
+  }
+
+A method is looked up by name in the model, so only the methods that the
+model defines are available. Calling another one is reported as an error.
+A ``Seq`` is a list: the model has no other implementation of it.
+
+The immutable ``Set`` and ``Map`` of Scala are the built-in sets and maps of
+Stainless, like ``stainless.lang.Set`` and ``stainless.lang.Map``. Their
+literals (``Set(1, 2)``, ``Map(1 -> 2)``, ``Set.empty``), the operations of the
+built-in types and the ``exists``, ``forall``, ``map``, ``flatMap`` and
+``filter`` methods of sets are available, and ``get`` on a map returns the
+Scala ``Option``.
+
+.. code-block:: scala
+
+  def bind(env: Map[String, BigInt], x: String, v: BigInt): Map[String, BigInt] = {
+    env + (x -> v)
+  }.ensuring(res => res.get(x) == Some(v))
+
+Enumerating a set or a map (``toList``, ``foreach``, ``size``, ...) is not
+supported: two equal sets may enumerate their elements in different orders, so
+the result is not a function of the set.
+
 PartialFunction[A, B]
 ---------------------
 
