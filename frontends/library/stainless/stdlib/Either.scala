@@ -1,7 +1,7 @@
 /* Copyright 2009-2026 EPFL, Lausanne */
 
 package stainless
-package covcollection
+package stdlib
 
 import annotation._
 

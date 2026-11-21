@@ -370,11 +370,11 @@ same members, and it is the model that gets verified.
 +--------------------------------------------------+------------------------------------------+
 | Scala class                                      | Model                                    |
 +==================================================+==========================================+
-| ``Option``, ``Some``, ``None``                   | ``stainless.covcollection.Option``       |
+| ``Option``, ``Some``, ``None``                   | ``stainless.stdlib.Option``              |
 +--------------------------------------------------+------------------------------------------+
-| ``List``, ``::``, ``Nil``, ``Seq``               | ``stainless.covcollection.List``         |
+| ``List``, ``::``, ``Nil``, ``Seq``               | ``stainless.stdlib.List``                |
 +--------------------------------------------------+------------------------------------------+
-| ``Either``, ``Left``, ``Right``                  | ``stainless.covcollection.Either``       |
+| ``Either``, ``Left``, ``Right``                  | ``stainless.stdlib.Either``              |
 +--------------------------------------------------+------------------------------------------+
 
 .. code-block:: scala

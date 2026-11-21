@@ -2109,7 +2109,9 @@ class CodeExtraction(inoxCtx: inox.Context,
 
     case ExCovListLiteral(tpt, args) => covariantListLiteral(tpt, args, tr.sourcePos)
 
-    case ExScalaListLiteral(tpt, args) => covariantListLiteral(tpt, args, tr.sourcePos)
+    case ExStdListLiteral(tpt, args) => stdlibListLiteral(tpt, args, tr.sourcePos)
+
+    case ExScalaListLiteral(tpt, args) => stdlibListLiteral(tpt, args, tr.sourcePos)
 
     case ExImplies(lhs, rhs) =>
       xt.Implies(extractTree(lhs), extractTree(rhs))
@@ -2243,6 +2245,9 @@ class CodeExtraction(inoxCtx: inox.Context,
 
   private def covariantListLiteral(tpt: tpd.Tree, args: List[tpd.Tree], pos: inox.utils.Position)(using dctx: DefContext): xt.Expr =
     listLiteral(tp => xt.ClassType(getIdentifier(covConsSymbol), Seq(tp)), _ => xt.ClassType(getIdentifier(covNilSymbol), Seq.empty))(tpt, args, pos)
+
+  private def stdlibListLiteral(tpt: tpd.Tree, args: List[tpd.Tree], pos: inox.utils.Position)(using dctx: DefContext): xt.Expr =
+    listLiteral(tp => xt.ClassType(getIdentifier(stdConsSymbol), Seq(tp)), _ => xt.ClassType(getIdentifier(stdNilSymbol), Seq.empty))(tpt, args, pos)
 
   private def listLiteral(mkCons: xt.Type => xt.ClassType, mkNil: xt.Type => xt.ClassType)
                          (tpt: tpd.Tree, args: List[tpd.Tree], pos: inox.utils.Position)(using dctx: DefContext): xt.Expr = {
