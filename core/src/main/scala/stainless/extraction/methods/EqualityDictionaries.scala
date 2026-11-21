@@ -66,6 +66,12 @@ trait EqualityDictionaries extends ExtractionPipeline {
     eqvIds.getOrElseUpdate(root.id, ast.SymbolIdentifier(root.id.name + "Eqv"))
   }
 
+  private val nestedEqvIds: MutableMap[Type, Identifier] = MutableMap.empty
+
+  private def nestedEqvId(tpe: Type, name: String): Identifier = synchronized {
+    nestedEqvIds.getOrElseUpdate(tpe, ast.SymbolIdentifier(name))
+  }
+
   private def eqvTparam(root: ClassDef, i: Int): TypeParameter = synchronized {
     eqvTparams.getOrElseUpdate((root.id, i), TypeParameter.fresh(root.typeArgs(i).id.name))
   }
@@ -197,6 +203,7 @@ trait EqualityDictionaries extends ExtractionPipeline {
 
     var changed = false
     val generated: MutableMap[Identifier, Option[FunDef]] = MutableMap.empty
+    val generatedNested: MutableMap[Type, FunDef] = MutableMap.empty
 
     def rootOf(tcd: TypedClassDef): TypedClassDef = tcd.ancestors.lastOption.getOrElse(tcd)
 
@@ -213,6 +220,12 @@ trait EqualityDictionaries extends ExtractionPipeline {
         case tp: TypeParameter => !dicts.contains(tp)
         case _ => false
       }
+
+      /** Whether a type holds a class whose equality is being generated. */
+      private def inProgress(tpe: Type): Boolean = typeOps.exists {
+        case ClassType(id, _) => inRoots(rootOf(symbols.getClass(id).typed).cd.id)
+        case _ => false
+      } (tpe)
 
       private def bind(e: Expr)(body: Variable => Expr): Expr = e match {
         case v: Variable => body(v)
@@ -237,9 +250,16 @@ trait EqualityDictionaries extends ExtractionPipeline {
                 if (root.tps.contains(Untyped) || root.descendants.exists(_.tps.contains(Untyped)))
                   throw MethodsException(ct, s"Equality on class ${ct.id.name} is not supported yet, " +
                     "as its hierarchy instantiates a parent at a specific type")
-                generate(root.cd)
-                FunctionInvocation(eqvId(root.cd), root.tps,
-                  eqvParams(root.cd).map(i => dictionary(root.tps(i))) ++ Seq(lhs, rhs))
+                if (root.tps.exists(inProgress)) {
+                  // The class recurses through this type, so it can't take a dictionary of the class
+                  val nested = generateNested(root, dicts.keySet, inRoots)
+                  FunctionInvocation(nested.id, nested.typeArgs,
+                    nested.typeArgs.filter(dicts.contains).map(dicts) ++ Seq(lhs, rhs))
+                } else {
+                  generate(root.cd)
+                  FunctionInvocation(eqvId(root.cd), root.tps,
+                    eqvParams(root.cd).map(i => dictionary(root.tps(i))) ++ Seq(lhs, rhs))
+                }
             }
 
           case TupleType(tps) =>
@@ -260,10 +280,9 @@ trait EqualityDictionaries extends ExtractionPipeline {
           changed = true
           FunctionInvocation(formalEq, Seq(tpe), Seq.empty)
         case _ =>
-          for (case ClassType(id, _) <- typeOps.collect[Type] { case ct: ClassType => Set(ct); case _ => Set.empty } (tpe);
-               root = rootOf(symbols.getClass(id).typed).cd if inRoots(root.id)) {
-            throw MethodsException(tpe, s"Equality on class ${root.id.name} is not supported yet, " +
-              s"as it recurses through the type ${tpe.asString(using PrinterOptions())}")
+          if (inProgress(tpe)) {
+            throw MethodsException(tpe, "Equality on a class that recurses through the type " +
+              s"${tpe.asString(using PrinterOptions())} is not supported yet")
           }
           val (x, y) = (ValDef.fresh("x", tpe), ValDef.fresh("y", tpe))
           ClassConstructor(eqType(tpe), Seq(Lambda(Seq(x, y), equality(tpe, x.toVariable, y.toVariable))))
@@ -290,16 +309,47 @@ trait EqualityDictionaries extends ExtractionPipeline {
     /** Generates the equality of a class hierarchy. */
     def generate(root: ClassDef): Unit = if (!generated.contains(root.id)) {
       generated(root.id) = None
-
       val tparams = root.typeArgs.indices.map(i => eqvTparam(root, i))
-      val tcd = root.typed(tparams)
+      generated(root.id) = Some(build(eqvId(root), tparams, root.typed(tparams), eqvParams(root).map(tparams),
+        generated.collect { case (id, None) => id }.toSet))
+    }
+
+    /** Generates the equality of a class hierarchy at the type arguments through which another
+      * class recurses, as in `List[Tree[A]]` for the children of a `Tree[A]`. It takes the
+      * dictionaries of that class. */
+    def generateNested(root: TypedClassDef, dicts: Set[TypeParameter], inRoots: Set[Identifier]): FunDef = {
+      val tpe = root.toType
+      generatedNested.get(tpe) match {
+        case Some(fd) => fd
+        case None =>
+          val tparams = {
+            var seen: Seq[TypeParameter] = Seq.empty
+            typeOps.preTraversal { case tp: TypeParameter if !seen.contains(tp) => seen :+= tp; case _ => } (tpe)
+            seen
+          }
+          val id = nestedEqvId(tpe, root.cd.id.name + "Eqv_" + root.tps.flatMap { tp =>
+            typeOps.collect[String] { case ClassType(id, _) => Set(id.name); case _ => Set.empty } (tp)
+          }.distinct.mkString("_"))
+
+          // The function is registered before its body is built, as the body refers to it
+          generatedNested(tpe) = new FunDef(id, tparams.map(TypeParameterDef(_)),
+            tparams.filter(dicts).map(tp => ValDef.fresh("eq" + tp.id.name, eqType(tp))) ++
+              Seq(ValDef.fresh("x", tpe), ValDef.fresh("y", tpe)),
+            BooleanType(), NoTree(BooleanType()), Seq(Derived(None)))
+          val fd = build(id, tparams, root, tparams.filter(dicts), inRoots)
+          generatedNested(tpe) = fd
+          fd
+      }
+    }
+
+    def build(id: Identifier, tparams: Seq[TypeParameter], tcd: TypedClassDef,
+              dictTparams: Seq[TypeParameter], inRoots: Set[Identifier]): FunDef = {
+      val root = tcd.cd
       val tpe = tcd.toType
-      val dicts = eqvParams(root).map(i => ValDef.fresh("eq" + tparams(i).id.name, eqType(tparams(i))))
+      val dicts = dictTparams.map(tp => ValDef.fresh("eq" + tp.id.name, eqType(tp)))
       val (x, y) = (ValDef.fresh("x", tpe), ValDef.fresh("y", tpe))
 
-      val rewriter = new Rewriter(
-        (eqvParams(root).map(tparams) zip dicts.map(_.toVariable)).toMap,
-        generated.collect { case (id, None) => id }.toSet)
+      val rewriter = new Rewriter((dictTparams zip dicts.map(_.toVariable)).toMap, inRoots)
 
       val body = orJoin((tcd +: tcd.descendants).filterNot(_.cd.isAbstract).map { sub =>
         val subTpe = sub.toType
@@ -313,14 +363,14 @@ trait EqualityDictionaries extends ExtractionPipeline {
       val res = ValDef.fresh("res", BooleanType())
       val post = Lambda(Seq(res), Implies(Equals(x.toVariable, y.toVariable), res.toVariable))
 
-      generated(root.id) = Some(new FunDef(
-        eqvId(root),
+      new FunDef(
+        id,
         tparams.map(TypeParameterDef(_)),
         dicts ++ Seq(x, y),
         BooleanType(),
         exprOps.withPostcondition(body, Some(post)),
         Seq(Derived(None))
-      ).copiedFrom(root))
+      ).copiedFrom(root)
     }
 
     val newFunctions = functions.map { fd =>
@@ -363,7 +413,7 @@ trait EqualityDictionaries extends ExtractionPipeline {
       }
 
       val newSymbols = NoSymbols
-        .withFunctions(newFunctions ++ generated.values.flatten ++ Seq(invariant, formalEqDef))
+        .withFunctions(newFunctions ++ generated.values.flatten ++ generatedNested.values ++ Seq(invariant, formalEqDef))
         .withClasses(symbols.classes.values.toSeq :+ eqDef)
         .withSorts(symbols.sorts.values.toSeq)
         .withTypeDefs(symbols.typeDefs.values.toSeq)
