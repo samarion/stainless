@@ -66,10 +66,27 @@ sealed abstract class Option[+T] {
     case None => Set[TT]()
     case Some(x) => Set(x)
   }
+
+  def toList: List[T] = this match {
+    case None => Nil
+    case Some(x) => x :: Nil
+  }
+
+  def contains[TT >: T](elem: TT): Boolean = this match {
+    case None => false
+    case Some(x) => x == elem
+  }
+
+  def fold[R](ifEmpty: => R)(f: T => R): R = this match {
+    case None => ifEmpty
+    case Some(x) => f(x)
+  }
 }
 
 @library
-case class Some[+T](v: T) extends Option[T]
+case class Some[+T](v: T) extends Option[T] {
+  def value: T = v
+}
 
 @library
 case object None extends Option[Nothing]
