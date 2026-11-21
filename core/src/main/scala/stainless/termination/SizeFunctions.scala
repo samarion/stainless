@@ -21,7 +21,11 @@ class SizeFunctions(val trees: Trees) {
     val (fullSize, rest) = functions.partition(fd => fullSizeIds.contains(fd.id))
     val (inSyms, outSyms) = fullSize.partition(fd => sortIds.contains(fd.id))
 
-    inSyms ++ rest
+    val nested = nestedCache.collect {
+      case ((_, sorts), fd) if sorts.forall(sort => symbols.sorts.get(sort.id).contains(sort)) => fd
+    }
+
+    inSyms ++ nested ++ rest
   }
 
   /* Absolute value for BigInt type
@@ -180,6 +184,94 @@ class SizeFunctions(val trees: Trees) {
     fd
   }
 
+  /* Sizes of nested data types
+   *
+   * The size function of a sort ignores the values whose type is a type parameter of the sort, so
+   * the size of a `List[T]` doesn't account for its elements. This is not enough for a sort that
+   * recurses through another one, such as
+   *
+   *   case class Tree[A](value: A, children: List[Tree[A]])
+   *
+   * where a child must be smaller than the list it belongs to. An ADT type that is instantiated
+   * with a sort that depends on its own sort, as `List[Tree[A]]` is, therefore has a size function
+   * of its own that accounts for the values of these type arguments:
+   *
+   * def ListPrimitiveSize_Tree[A](x: List[Tree[A]]): BigInt = (x match {
+   *   case Cons(h, t) => 1 + TreePrimitiveSize[A](h) + ListPrimitiveSize_Tree[A](t)
+   *   case Nil() => 0
+   * }).ensuring (_ >= 0)
+   *
+   * The function is shared by all the types of the same shape, namely those that only differ
+   * by the type arguments whose values are ignored (the holes of the shape).
+   */
+
+  private val holes: ListBuffer[TypeParameter] = new ListBuffer[TypeParameter]
+
+  private def hole(i: Int): TypeParameter = synchronized {
+    while (holes.size <= i) holes += TypeParameter.fresh("T" + holes.size)
+    holes(i)
+  }
+
+  private def sortsOf(tpe: Type): Set[Identifier] = typeOps.collect[Identifier] {
+    case ADTType(id, _) => Set(id)
+    case _ => Set.empty
+  } (tpe)
+
+  private def isNested(adt: ADTType)(using symbols: Symbols): Boolean =
+    adt.tps.exists(tp => sortsOf(tp).exists(id => id != adt.id && symbols.dependsOn(id, adt.id)))
+
+  /** The shape of a nested type and the type arguments that fill its holes. */
+  private def shapeOf(adt: ADTType): (ADTType, Seq[Type]) = {
+    val args = new ListBuffer[Type]
+    def rec(tpe: Type): Type = tpe match {
+      case ADTType(id, tps) => ADTType(id, tps.map(rec))
+      case TupleType(tps) => TupleType(tps.map(rec))
+      case _ =>
+        args += tpe
+        hole(args.size - 1)
+    }
+    (rec(adt).asInstanceOf[ADTType], args.toSeq)
+  }
+
+  /** The sorts that the size of a type depends on. */
+  private def reachableSorts(tpe: Type)(using symbols: Symbols): Set[ADTSort] = {
+    var seen: Set[Identifier] = Set.empty
+    def rec(tpe: Type): Unit = for (id <- sortsOf(tpe) if !seen(id)) {
+      seen += id
+      symbols.getSort(id).constructors.foreach(_.fields.foreach(vd => rec(vd.getType)))
+    }
+    rec(tpe)
+    seen.map(symbols.getSort)
+  }
+
+  private val nestedCache: MutableMap[(ADTType, Set[ADTSort]), FunDef] = MutableMap.empty
+
+  private def nestedSizeFun(shape: ADTType, arity: Int)(using symbols: Symbols): FunDef = synchronized {
+    val key = (shape, reachableSorts(shape))
+    nestedCache.getOrElse(key, {
+      val sort = shape.getSort
+      val args = shape.tps.flatMap(sortsOf).map(_.name).distinct
+      val id = FreshIdentifier((sort.id.name +: "PrimitiveSize" +: args).mkString("_"))
+      val tparams = (0 until arity).map(i => TypeParameterDef(hole(i)))
+      val v = Variable.fresh("x", shape)
+
+      // The function is registered before its body is built, as the body refers to it
+      val signature = new FunDef(id, tparams, Seq(v.toVal), IntegerType(), NoTree(IntegerType()), Seq(Synthetic))
+      nestedCache(key) = signature
+
+      val fd = signature.copy(fullBody = Ensuring(MatchExpr(v, sort.constructors.map { cons =>
+        val arguments = cons.fields.map(_.freshen).toList
+        val argumentPatterns = arguments.map(vd => WildcardPattern(Some(vd)))
+        val base: Expr = if (cons.fields.nonEmpty) IntegerLiteral(1) else IntegerLiteral(0)
+        val rhs = arguments.map(vd => fullSize(vd.toVariable)).foldLeft(base)(_ + _)
+        MatchCase(ADTPattern(None, cons.id, cons.tps, argumentPatterns), None, rhs)
+      }.toList), \("res" :: IntegerType())(res => res >= E(BigInt(0)))).copiedFrom(sort.definition))
+
+      nestedCache(key) = fd
+      fd
+    })
+  }
+
   /* Fully recursive size computation
    *
    * Computes (positive) size of Stainless types by summing up all sub-elements
@@ -188,6 +280,10 @@ class SizeFunctions(val trees: Trees) {
   def fullSize(expr: Expr)(using symbols: Symbols): Expr = synchronized {
     // The type arguments keep their refinements, as the size function must accept `expr`
     symbols.unrefined(expr.getTpe(stripRefinements = false)) match {
+      case adt: ADTType if isNested(adt) =>
+        val (shape, holes) = shapeOf(adt)
+        FunctionInvocation(nestedSizeFun(shape, holes.size).id, holes, Seq(expr))
+
       case adt: ADTType =>
         val id = fullSizeId(adt.getSort.definition)
         FunctionInvocation(id, adt.tps, Seq(expr))
