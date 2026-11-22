@@ -7,10 +7,10 @@ object AnonymousClassBody:
   abstract class Foo:
     def get: BigInt
 
-  /** Uses `scala.collection.immutable.Set` inside an anonymous class. */
+  /** Uses `scala.collection.immutable.Vector` inside an anonymous class. */
   def inAnon(): BigInt =
     val foo: Foo = new Foo:
       def get: BigInt =
-        val l: scala.collection.immutable.Set[Int] = scala.collection.immutable.Set(1, 2)
+        val l: scala.collection.immutable.Vector[Int] = scala.collection.immutable.Vector(1, 2)
         BigInt(l.size)
     foo.get

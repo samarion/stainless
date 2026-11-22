@@ -1,0 +1,3 @@
+[ Error  ] ScalaSetNoModel.scala:3:42: Unsupported call to toList on s
+             def elements(s: Set[Int]): List[Int] = s.toList
+                                                    ^^^^^^^^

@@ -252,6 +252,20 @@ trait ASTExtractors {
     }
   }
 
+  protected lazy val setModuleSym = moduleFromName("stainless.lang.Set").moduleClass
+  /** Whether `tpe` is the result of `withFilter` on a Scala set. */
+  def isScalaSetWithFilter(tpe: Type): Boolean = tpe.widenDealias match {
+    case AppliedType(tr: TypeRef, Seq(_, cc)) =>
+      tr.symbol == classFromName("scala.collection.WithFilter") && scalaSetSyms.contains(cc.typeSymbol)
+    case _ => false
+  }
+
+  // The Scala sets and maps are the built-in sets and maps of Stainless, like `stainless.lang.Set` and `Map`
+  protected lazy val scalaSetSyms: Set[Symbol] =
+    Set(classFromName("scala.collection.immutable.Set"), classFromName("scala.collection.Set"))
+  protected lazy val scalaMapSyms: Set[Symbol] =
+    Set(classFromName("scala.collection.immutable.Map"), classFromName("scala.collection.Map"))
+
   protected lazy val optionClassSym     = classFromName("scala.Option")
   protected lazy val arraySym           = classFromName("scala.Array")
   protected lazy val someClassSym       = classFromName("scala.Some")
@@ -316,11 +330,19 @@ trait ASTExtractors {
   }
 
   def isSetSym(sym: Symbol) : Boolean = {
-    getResolvedTypeSym(sym) == setSym
+    val resolved = getResolvedTypeSym(sym)
+    resolved == setSym || scalaSetSyms.contains(resolved)
   }
 
   def isMapSym(sym: Symbol) : Boolean = {
-    getResolvedTypeSym(sym) == mapSym
+    val resolved = getResolvedTypeSym(sym)
+    resolved == mapSym || scalaMapSyms.contains(resolved)
+  }
+
+  /** Whether `tpe` is a Scala set or map, which are extracted as the built-in set and map types. */
+  def isScalaSetOrMap(tpe: Type): Boolean = {
+    val sym = tpe.widenDealias.classSymbol
+    scalaSetSyms.contains(sym) || scalaMapSyms.contains(sym)
   }
 
   def isMutableMapSym(sym: Symbol) : Boolean = {
@@ -1703,17 +1725,29 @@ trait ASTExtractors {
     }
 
     object ExFiniteMap {
-      def unapply(tree: tpd.Apply): Option[(tpd.Tree, tpd.Tree, List[tpd.Tree])] = tree match {
+      def unapply(tree: tpd.Tree): Option[(tpd.Tree, tpd.Tree, List[tpd.Tree])] = tree match {
         case Apply(TypeApply(ExSymbol("stainless", "lang", "Map$", "apply"), List(tptFrom, tptTo)), args) =>
           Some((tptFrom, tptTo, args))
+        case Apply(TypeApply(fun @ Select(qual, _), List(tptFrom, tptTo)), args)
+        if fun.symbol.name == nme.apply && scalaMapSyms.contains(qual.tpe.widen.classSymbol.companionClass) =>
+          Some((tptFrom, tptTo, args))
+        case TypeApply(fun @ Select(qual, _), List(tptFrom, tptTo))
+        if fun.symbol.name.toString == "empty" && scalaMapSyms.contains(qual.tpe.widen.classSymbol.companionClass) =>
+          Some((tptFrom, tptTo, Nil))
         case _ => None
       }
     }
 
     object ExFiniteSet {
-      def unapply(tree: tpd.Apply): Option[(tpd.Tree,List[tpd.Tree])] = tree match {
+      def unapply(tree: tpd.Tree): Option[(tpd.Tree,List[tpd.Tree])] = tree match {
         case Apply(TypeApply(ExSymbol("stainless", "lang", "Set$", "apply"), List(tpt)), args) =>
           Some(tpt, args)
+        case Apply(TypeApply(fun @ Select(qual, _), List(tpt)), args)
+        if fun.symbol.name == nme.apply && scalaSetSyms.contains(qual.tpe.widen.classSymbol.companionClass) =>
+          Some(tpt, args)
+        case TypeApply(fun @ Select(qual, _), List(tpt))
+        if fun.symbol.name.toString == "empty" && scalaSetSyms.contains(qual.tpe.widen.classSymbol.companionClass) =>
+          Some(tpt, Nil)
         case _ => None
       }
     }

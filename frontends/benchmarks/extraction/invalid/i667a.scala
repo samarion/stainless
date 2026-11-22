@@ -36,10 +36,10 @@ object i667a:
   def scalaApiInPostcondition(x: Int): Unit = {
     ()
   } ensuring { _ =>
-    val l = scala.collection.immutable.Set(x)
+    val l = scala.collection.immutable.Vector(x)
     true
   }
 
   def scalaApiInEnsuringReceiver(x: Int): Int = {
-    scala.collection.immutable.Set(x).head
+    scala.collection.immutable.Vector(x).head
   } ensuring (_ == x)

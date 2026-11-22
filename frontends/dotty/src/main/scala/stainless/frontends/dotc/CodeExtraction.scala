@@ -2424,6 +2424,28 @@ class CodeExtraction(inoxCtx: inox.Context,
         case (xt.MutableMapType(_, _), "duplicate", Seq()) =>
           xt.MutableMapDuplicate(extractTree(lhs))
 
+        // The higher-order methods of a Scala set are the extension methods of `stainless.lang.Set`
+        case (xt.SetType(base), name @ ("exists" | "forall" | "map" | "flatMap" | "filter" | "withFilter" | "nonEmpty"), _)
+        if isScalaSetOrMap(lhs.tpe) || isScalaSetWithFilter(lhs.tpe) =>
+          val ext = setModuleSym.info.decl(termName(name)).symbol
+          xt.FunctionInvocation(getIdentifier(ext), base +: tps.map(extractType), extractTree(lhs) +: args.map(extractTree))
+
+        // A Scala map returns a Scala option, whose model is not the option that built-in maps contain
+        case (xt.MapType(_, xt.ClassType(_, Seq(to))), "get", Seq(rhs)) if isScalaSetOrMap(lhs.tpe) =>
+          val pos = tr.sourcePos
+          val someTpe = xt.ClassType(getIdentifier(someSymbol), Seq(to)).setPos(pos)
+          val scalaSome = libraryModelOf(defn.SomeClass)
+          val scalaNone = libraryModelOf(defn.NoneModule.moduleClass)
+          val vd = xt.ValDef(FreshIdentifier("res", true), xt.ClassType(getIdentifier(optionSymbol), Seq(to)).setPos(pos)).setPos(pos)
+          xt.Let(vd, xt.MapApply(extractTree(lhs), extractTree(rhs)).setPos(pos), xt.IfExpr(
+            xt.IsInstanceOf(vd.toVariable, someTpe).setPos(pos),
+            xt.ClassConstructor(xt.ClassType(getIdentifier(scalaSome), Seq(to)).setPos(pos), Seq(xt.ClassSelector(
+              xt.AsInstanceOf(vd.toVariable, someTpe).setPos(pos),
+              getIdentifier(someSymbol.info.decl(termName("v")).symbol)
+            ).setPos(pos))).setPos(pos),
+            xt.ClassConstructor(xt.ClassType(getIdentifier(scalaNone), Seq.empty).setPos(pos), Seq.empty).setPos(pos)
+          ).setPos(pos))
+
         case (xt.MapType(_, _), "get", Seq(rhs)) =>
           xt.MapApply(extractTree(lhs), extractTree(rhs))
 
@@ -2954,6 +2976,11 @@ class CodeExtraction(inoxCtx: inox.Context,
       case tpe if isStringSym(tpe.typeSymbol)        => restoreRefinements(xt.StringType())
       case tpe if isWrappedFloatSym(tpe.typeSymbol)  => restoreRefinements(xt.Float32Type())
       case tpe if isWrappedDoubleSym(tpe.typeSymbol) => restoreRefinements(xt.Float64Type())
+
+      // The result of `withFilter` on a Scala set, which a `for` comprehension with a guard goes through
+      case tpe if isScalaSetWithFilter(tpe) =>
+        val AppliedType(_, Seq(tp, _)) = tpe.widenDealias: @unchecked
+        xt.SetType(extractType(tp))
 
       case AppliedType(tr: TypeRef, Seq(tp)) if isSetSym(tr.symbol) =>
         // We know the underlying is a set, but it may be hidden under an alias
