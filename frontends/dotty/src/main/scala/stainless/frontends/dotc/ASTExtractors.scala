@@ -170,6 +170,10 @@ trait ASTExtractors {
   protected lazy val covListSymbol = classFromName("stainless.covcollection.List")
   protected lazy val covConsSymbol = classFromName("stainless.covcollection.::")
   protected lazy val covNilSymbol  = moduleFromName("stainless.covcollection.Nil").moduleClass
+  // The models of the Scala standard library
+  protected lazy val stdListSymbol = classFromName("stainless.stdlib.List")
+  protected lazy val stdConsSymbol = classFromName("stainless.stdlib.::")
+  protected lazy val stdNilSymbol  = moduleFromName("stainless.stdlib.Nil").moduleClass
 
   /** Classes and objects of the Scala standard library that are extracted as their model in the
     * Stainless library. The model has the members of the Scala class it stands for, under the
@@ -184,18 +188,18 @@ trait ASTExtractors {
       moduleFromName(scala).moduleClass -> moduleFromName(model).moduleClass
     )
     (
-      classModel("scala.Option", "stainless.covcollection.Option") ++
-      classModel("scala.Some", "stainless.covcollection.Some") ++
-      objectModel("scala.None", "stainless.covcollection.None") ++
-      classModel("scala.collection.immutable.List", "stainless.covcollection.List") ++
-      classModel("scala.collection.immutable.::", "stainless.covcollection.::") ++
-      objectModel("scala.collection.immutable.Nil", "stainless.covcollection.Nil") ++
+      classModel("scala.Option", "stainless.stdlib.Option") ++
+      classModel("scala.Some", "stainless.stdlib.Some") ++
+      objectModel("scala.None", "stainless.stdlib.None") ++
+      classModel("scala.collection.immutable.List", "stainless.stdlib.List") ++
+      classModel("scala.collection.immutable.::", "stainless.stdlib.::") ++
+      objectModel("scala.collection.immutable.Nil", "stainless.stdlib.Nil") ++
       // A sequence is a list: the model has no other implementation of `Seq`
-      classModel("scala.collection.immutable.Seq", "stainless.covcollection.List") ++
-      classModel("scala.collection.Seq", "stainless.covcollection.List") ++
-      classModel("scala.util.Either", "stainless.covcollection.Either") ++
-      classModel("scala.util.Left", "stainless.covcollection.Left") ++
-      classModel("scala.util.Right", "stainless.covcollection.Right")
+      classModel("scala.collection.immutable.Seq", "stainless.stdlib.List") ++
+      classModel("scala.collection.Seq", "stainless.stdlib.List") ++
+      classModel("scala.util.Either", "stainless.stdlib.Either") ++
+      classModel("scala.util.Left", "stainless.stdlib.Left") ++
+      classModel("scala.util.Right", "stainless.stdlib.Right")
     ).filter((scala, model) => scala.exists && model.exists).toMap
   }
 
@@ -1813,12 +1817,22 @@ trait ASTExtractors {
       }
     }
 
+    /** Matches the construct stdlib.List[tpe](a, b, ...) and returns tpe and arguments */
+    object ExStdListLiteral {
+      def unapply(tree: tpd.Apply): Option[(tpd.Tree, List[tpd.Tree])] = tree match {
+        case Apply(TypeApply(ExSymbol("stainless", "stdlib", "List$", "apply"), List(tpt)), args) =>
+          Some((tpt, args))
+        case _ =>
+          None
+      }
+    }
+
     /** Matches the construct scala.List[tpe](a, b, ...) and returns tpe and arguments */
     object ExScalaListLiteral {
       def unapply(tree: tpd.Apply): Option[(tpd.Tree, List[tpd.Tree])] = tree match {
         case Apply(TypeApply(fun @ Select(qual, _), List(tpt)), args)
         if fun.symbol.name == nme.apply &&
-           libraryModels.get(qual.tpe.widen.classSymbol).contains(covListSymbol.companionModule.moduleClass) =>
+           libraryModels.get(qual.tpe.widen.classSymbol).contains(stdListSymbol.companionModule.moduleClass) =>
           Some((tpt, args))
         case _ =>
           None

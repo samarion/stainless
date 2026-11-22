@@ -1,7 +1,7 @@
 import stainless.lang.{Option => _, Some => _, None => _, Either => _, Left => _, Right => _, _}
 
 /** The Scala `Option`, `List`, `Seq` and `Either` are verified through their models
-  * in `stainless.covcollection`.
+  * in `stainless.stdlib`.
   */
 object ScalaLibrary {
   case class Entry(key: BigInt, value: Option[BigInt], tags: List[BigInt])

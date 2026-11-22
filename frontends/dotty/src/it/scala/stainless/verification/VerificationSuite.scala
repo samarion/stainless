@@ -98,6 +98,7 @@ class VerificationSuite extends VerificationComponentTestSuite {
       "verification/valid/ContMonad",
       "verification/valid/Count",
       "verification/valid/CovCollection",
+      "verification/valid/StdlibCollection",
       "verification/valid/Filter",
       "verification/valid/FiniteSort",
       "verification/valid/FlatMap",

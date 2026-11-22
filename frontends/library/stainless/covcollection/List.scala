@@ -711,12 +711,6 @@ sealed abstract class List[+T] {
     case (current, next) => current ++ Set[TT](next)
   }
 
-  def toList: List[T] = this
-
-  def toSeq: List[T] = this
-
-  def distinct: List[T] = unique
-
   @extern @pure
   def toScala: ScalaList[T] = foldRight(ScalaList.empty[T])(_ :: _)
 }
