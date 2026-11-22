@@ -360,6 +360,39 @@ Additionally, the following functions for Sets are provided in the
 +-----------------------------------------------------------+-------------------------------------------+
 
 
+Scala Standard Library
+----------------------
+
+Some classes of the Scala standard library can be used directly. Stainless
+extracts them as their *model*, a class of the Stainless library that has the
+same members, and it is the model that gets verified.
+
++--------------------------------------------------+------------------------------------------+
+| Scala class                                      | Model                                    |
++==================================================+==========================================+
+| ``Option``, ``Some``, ``None``                   | ``stainless.stdlib.Option``              |
++--------------------------------------------------+------------------------------------------+
+| ``List``, ``::``, ``Nil``, ``Seq``               | ``stainless.stdlib.List``                |
++--------------------------------------------------+------------------------------------------+
+| ``Either``, ``Left``, ``Right``                  | ``stainless.stdlib.Either``              |
++--------------------------------------------------+------------------------------------------+
+
+.. code-block:: scala
+
+  def sum(xs: List[BigInt]): BigInt = xs match {
+    case Nil => BigInt(0)
+    case x :: rest => x + sum(rest)
+  }
+
+  def first(xs: List[BigInt]): BigInt = {
+    require(xs.nonEmpty)
+    xs.head // the precondition of the model's `head`
+  }
+
+A method is looked up by name in the model, so only the methods that the
+model defines are available. Calling another one is reported as an error.
+A ``Seq`` is a list: the model has no other implementation of it.
+
 PartialFunction[A, B]
 ---------------------
 

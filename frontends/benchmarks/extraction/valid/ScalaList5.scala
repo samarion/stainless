@@ -1,6 +1,6 @@
-//no import of stainless.collection.List
+// The Scala list is extracted as its model, stainless.stdlib.List
 
-object List5 {
+object ScalaList5 {
   type MyList[T] = List[T]
   def foobar[T](l: MyList[T]) = {
     require(l.size > 0)
