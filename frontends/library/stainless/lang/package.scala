@@ -175,6 +175,16 @@ package object lang {
     scala.Predef.print(x)
   }
 
+  /** Whether `==` on values of type `T` is the equality of the logic, which it is not when `T` is
+    * or holds a class that defines `equals`. A specification that relates `==` on a type parameter
+    * to the sets and maps of the logic only holds under this condition:
+    * {{{
+    * def contains(v: T): Boolean = { ... }.ensuring(res => formalEquality[T] ==> (res == content.contains(v)))
+    * }}}
+    */
+  @library
+  def formalEquality[T]: Boolean = true
+
   @library
   def specialize[T](call: T): T = call
 

@@ -40,6 +40,8 @@ package object methods {
   }
 
   def extractor(using inox.Context) = {
+    utils.NamedPipeline("UserEquality",    UserEquality(trees))    `andThen`
+    utils.NamedPipeline("EqualityDictionaries", EqualityDictionaries(trees)) `andThen`
     utils.NamedPipeline("InternallyMutableFields", InternallyMutableFields(trees)) `andThen`
     utils.NamedPipeline("ObservationallyPureCalls", ObservationallyPureCalls(trees)) `andThen`
     utils.NamedPipeline("Laws",            Laws(trees))            `andThen`

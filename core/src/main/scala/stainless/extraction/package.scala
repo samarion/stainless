@@ -34,6 +34,8 @@ package object extraction {
     "PartialFunctions"          -> "Lift partial function preconditions",
     "XlangLowering"             -> "Lowering phase at the end of xlang phases",
     "InnerClasses"              -> "Lift inner classes",
+    "UserEquality"              -> "Rewrite == on classes that define equals into calls to that method",
+    "EqualityDictionaries"      -> "Pass equality dictionaries for the type parameters that are compared with == and instantiated with a type that defines equals",
     "InternallyMutableFields"   -> "Check that @internallyMutable fields are only accessed by allowed methods, and not compared by equality",
     "ObservationallyPureCalls"  -> "Replace calls to observationally pure methods by their pure reference function",
     "Laws"                      -> "Rewrite laws as abstract functions with contracts",
