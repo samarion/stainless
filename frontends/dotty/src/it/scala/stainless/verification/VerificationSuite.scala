@@ -51,6 +51,16 @@ class VerificationSuite extends VerificationComponentTestSuite {
 
   private val ignorePrincess = ignoreCommon ++
     Set(
+      // Arrays
+      "verification/valid/Exceptions4",
+      "verification/valid/ExternPostconditionSatisfiable",
+      "verification/invalid/ExternPostconditionUnsatisfiable",
+      // Princess can't confirm that the postconditions of the externs are satisfiable
+      "verification/valid/ExternField",
+      "verification/valid/ExternFieldPure",
+      "verification/valid/i1401a",
+      "verification/valid/IgnoredField",
+      "verification/valid/MsgQueue",
       // valid/MicroTests
       "verification/valid/ADTWithArray1",
       "verification/valid/ADTWithArray2",
