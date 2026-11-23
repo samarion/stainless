@@ -148,6 +148,7 @@ class VerificationSuite extends VerificationComponentTestSuite {
       "verification/valid/RedBlackTree",
       "verification/valid/Reverse",
       "verification/valid/StableSorter",
+      "verification/valid/StringInterpolation", // Princess times out on strings
       "verification/valid/TransitiveQuantification",
       "verification/valid/Trees1",
       "verification/valid/ValueClasses",
@@ -218,6 +219,7 @@ class VerificationSuite extends VerificationComponentTestSuite {
       "verification/invalid/RedBlackTree2",
       "verification/invalid/SimpleQuantification2",
       "verification/invalid/SpecWithExtern",
+      "verification/invalid/StringInterpolation", // Princess has no model for the uninterpreted string
       "verification/invalid/FloatNonProperties",
       "verification/invalid/FloatNonAssociativity",
       "verification/invalid/FloatingPointFunctionsContradiction",
