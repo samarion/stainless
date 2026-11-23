@@ -34,6 +34,12 @@ class extern extends Annotation
 @ignore
 class dropVCs extends Annotation
 
+/** The annotated `@extern` function may return a different result on each call, even for equal
+  * arguments (e.g. it reads a clock, a counter or an external process). Each call makes a fresh
+  * choice among the results that satisfy the postcondition. */
+@ignore
+class nondet extends Annotation
+
 /** Don't unfold the function's body during verification. */
 @ignore
 class opaque extends Annotation

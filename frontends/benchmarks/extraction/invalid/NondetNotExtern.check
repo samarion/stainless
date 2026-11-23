@@ -1,0 +1,3 @@
+[ Fatal  ] NondetNotExtern.scala:5:7: Only @extern functions can be @nondet: f
+             def f(x: BigInt): BigInt = x + 1
+                 ^

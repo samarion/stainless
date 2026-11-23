@@ -1,0 +1,3 @@
+[ Fatal  ] NondetInLambda.scala:8:63: Stainless does not support constructing instances of classes with member classes, or calling nondeterministic externs, within lambdas
+             def times(n: BigInt): BigInt => BigInt = (x: BigInt) => x + now()
+                                                                         ^^^^^
