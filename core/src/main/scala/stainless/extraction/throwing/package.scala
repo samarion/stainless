@@ -5,6 +5,9 @@ package extraction
 
 package object throwing {
 
+  /** Whether the `@extern` functions without a `throwing` clause, outside the library, may throw any exception. */
+  object optExternThrows extends inox.FlagOptionDef("extern-throws", false)
+
   object trees extends throwing.Trees with oo.ClassSymbols {
     case class Symbols(
       functions: Map[Identifier, FunDef],

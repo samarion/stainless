@@ -42,7 +42,7 @@ class ExceptionLifting(override val s: Trees, override val t: imperative.Trees)
   )
 
   /** The synthetic sorts used to lift exceptions, for a given `stainless.lang.Exception` class. */
-  protected class LiftedSorts(exceptionClass: Identifier) {
+  protected class LiftedSorts(val exceptionClass: Identifier) {
     import t.dsl._
 
     val excType: t.Type = t.ClassType(exceptionClass, Seq())
@@ -116,8 +116,20 @@ class ExceptionLifting(override val s: Trees, override val t: imperative.Trees)
     val liftedSorts: Option[LiftedSorts] =
       symbols.lookup.get[s.ClassDef]("stainless.lang.Exception").map(cd => liftedSortsFor(cd.id))
 
+    private val externThrows = context.options.findOptionOrDefault(optExternThrows)
+
+    /** The full body of `fd`, with `throwing(_ => true)` for an `@extern` function that may throw any exception. */
+    def fullBodyOf(fd: s.FunDef): s.Expr = liftedSorts match {
+      case Some(ls) if externThrows && (fd.flags contains s.Extern) && !(fd.flags contains s.Library) && !isThrowing(fd.fullBody) =>
+        val specced = s.exprOps.BodyWithSpecs(fd.fullBody)
+        val exc = s.ValDef.fresh("exception", s.ClassType(ls.exceptionClass, Seq()).setPos(fd)).setPos(fd)
+        val pred = s.Lambda(Seq(exc), s.BooleanLiteral(true).setPos(fd)).setPos(fd)
+        s.exprOps.reconstructSpecs(specced.specs :+ s.exprOps.Exceptions(pred).setPos(fd), specced.bodyOpt, fd.returnType)
+      case _ => fd.fullBody
+    }
+
     val throwingFunctions: Set[Identifier] =
-      symbols.functions.values.filter(fd => isThrowing(fd.fullBody)).map(_.id).toSet
+      symbols.functions.values.filter(fd => isThrowing(fullBodyOf(fd))).map(_.id).toSet
 
     // The sorts are only needed by throwing functions and `try` blocks.
     val needsSorts: Boolean = liftedSorts.isDefined && (throwingFunctions.nonEmpty || symbols.functions.values.exists { fd =>
@@ -409,7 +421,7 @@ class ExceptionLifting(override val s: Trees, override val t: imperative.Trees)
     }
 
     lazy val result: t.FunDef = {
-      val (newReturnType, newBody) = liftBody(fd.returnType, fd.fullBody)
+      val (newReturnType, newBody) = liftBody(fd.returnType, tc.fullBodyOf(fd))
       new t.FunDef(
         fd.id, fd.tparams.map(transform), fd.params.map(transform), newReturnType, newBody, fd.flags.map(transform)
       ).copiedFrom(fd)
