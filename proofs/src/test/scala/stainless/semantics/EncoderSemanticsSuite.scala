@@ -341,9 +341,11 @@ class EncoderSemanticsSuite extends AnyFunSuite with InputUtils {
 
   private val inputsPerFunction = sys.props.get("semantics-inputs").map(_.toInt).getOrElse(30)
 
-  test("The generated evaluator is up to date with proofs/semantics.md") {
+  test("The generated evaluator and Lean definitions are up to date with proofs/semantics.md") {
     assert(Codegen.scala == Files.readString(Paths.get(Codegen.scalaOutput)),
       "the generated evaluator is out of date: run `sbt stainless-proofs/run`")
+    assert(Codegen.lean == Files.readString(Paths.get(Codegen.leanOutput)),
+      "the generated Lean definitions are out of date: run `sbt stainless-proofs/run`")
   }
 
   private val benchmarks = Paths.get("..", "frontends", "benchmarks")

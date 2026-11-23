@@ -1,0 +1,6 @@
+name = "StainlessSemantics"
+defaultTargets = ["StainlessSemantics"]
+
+[[lean_lib]]
+name = "StainlessSemantics"
+roots = ["Stainless"]

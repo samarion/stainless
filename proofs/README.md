@@ -25,6 +25,19 @@ must give the same result with the same fuel, an array being the same as the
 map and size that the encoder makes of it. A mutation test checks that reading
 Stainless's division as Inox's breaks the comparison.
 
+[`lean`](lean) is a Lake package (Lean 4.34.0, no dependencies) with the Lean
+definitions of the semantics, `Stainless/Semantics.lean`, which Inox's Lean
+backend generates from `semantics.md`, and the proofs about the extraction:
+
+- [`Stainless/Encoder/Division.lean`](lean/Stainless/Encoder/Division.lean):
+  `InoxEncoder`'s encoding of the JVM's integer division and remainder into
+  Inox's euclidean ones gives Stainless's result, including on a zero divisor,
+  where both get stuck.
+
+```sh
+cd proofs/lean && lake build
+```
+
 This directory is the sbt project `stainless-proofs`. It is not published.
 
 ```sh
@@ -32,8 +45,8 @@ sbt stainless-proofs/test
 sbt -Dsemantics-files=verification/valid/Heaps.scala stainless-proofs/test   # other benchmarks
 ```
 
-After changing `semantics.md`, regenerate the evaluator and commit it with it;
-a test fails while it is out of date:
+After changing `semantics.md`, regenerate the evaluator and the Lean
+definitions and commit them with it; a test fails while they are out of date:
 
 ```sh
 sbt stainless-proofs/run
