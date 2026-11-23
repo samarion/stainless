@@ -40,7 +40,7 @@ package object lang {
   }
 
   @library
-  abstract class Exception extends Throwable
+  class Exception extends Throwable
 
   @library
   @extern
@@ -61,18 +61,21 @@ package object lang {
   @library case class Success[T](t: T) extends Try[T]
   @library case class Failure[T](exc: Exception) extends Try[T]
 
-  /* // This would be a widely applicable implicit
-  @ignore 
+  /** `body.throwing(pred)` states that `body` may throw the exceptions that satisfy `pred`.
+    * The exceptions of a function without a `throwing` clause may not escape it.
+    *
+    * `pred` takes a `Throwable`, so that it can match on Java exceptions as well, but Stainless extracts
+    * `Throwable` as `Exception` (see `JavaExceptions.scala`). */
+  @ignore
   implicit class Throwing[T](underlying: => T) {
-    def throwing(pred: Exception => Boolean): T = try {
+    def throwing(pred: Throwable => Boolean): T = try {
       underlying
     } catch {
-      case e: Exception =>
+      case e: Throwable =>
         assert(pred(e))
         throw e
     }
   }
-   */
 
   @inline @library def because(b: Boolean) = b
 
