@@ -1856,6 +1856,19 @@ class CodeExtraction(inoxCtx: inox.Context,
     case ExArrayLiteral(tpe, args) =>
       xt.FiniteArray(extractSeq(args), extractType(tpe)(using dctx, tr.sourcePos))
 
+    // `s"a${x}b"` is `"a" + x.toString + "b"`
+    case ExStringInterpolation(parts, args) =>
+      def literal(part: String): Option[xt.Expr] =
+        Option.when(part.nonEmpty)(xt.StringLiteral(part).setPos(tr.sourcePos))
+      val strings = literal(parts.head).toSeq ++ args.zip(parts.tail).flatMap {
+        case (arg, part) => extractToString(arg) +: literal(part).toSeq
+      }
+      strings.reduceLeftOption((acc, str) => xt.StringConcat(acc, str).setPos(tr.sourcePos))
+        .getOrElse(xt.StringLiteral(""))
+
+    case Apply(fun, _) if fun.symbol == defn.StringContext_f =>
+      outOfSubsetError(tr, "Stainless does not support the `f` string interpolator, only `s` and `raw`")
+
     case s @ ExCaseObject(sym) =>
       extractType(s) match {
         case ct: xt.ClassType => xt.ClassConstructor(ct, Seq.empty)
@@ -2340,10 +2353,48 @@ class CodeExtraction(inoxCtx: inox.Context,
       )
   }
 
+  /** The string of `tree`, as `tree.toString`. */
+  private def extractToString(tree: tpd.Tree)(using dctx: DefContext): xt.Expr = {
+    val sym = tree.tpe.widen.member(nme.toString_).suchThat(_.info.firstParamTypes.isEmpty).symbol
+    extractCall(tree, Some(tree), if (sym.exists) sym else defn.Any_toString, Seq.empty, Seq.empty)
+  }
+
+  /** Whether `sym` is a `toString` that Stainless doesn't extract, as it isn't defined in the user's
+    * classes (but in `Any`, `Int`, `BigInt`, ...) or the compiler synthesized it (in case classes). */
+  private def isUnextractedToString(lhs: tpd.Tree, sym: Symbol, args: Seq[tpd.Tree])(using dctx: DefContext): Boolean =
+    sym.name == nme.toString_ && args.isEmpty && sym.info.firstParamTypes.isEmpty && {
+      val owner = sym.owner
+      (sym `is` Synthetic) || owner == defn.AnyClass || owner == defn.ObjectClass || (owner `is` JavaDefined) ||
+      isIgnored(owner.typeRef) || (extractType(lhs)(using dctx.setResolveTypes(true)).stripToplevelRefinement match {
+        case _: (xt.ClassType | xt.LocalClassType) => false
+        case xt.AnnotatedType(_: (xt.ClassType | xt.LocalClassType), _) => false
+        case _ => true
+      })
+    }
+
+  /** The string of `lhs`, for a `toString` that Stainless doesn't extract: `lhs` itself for a string, and
+    * otherwise the uninterpreted `StrOps.valueToString`, which only depends on the value of `lhs`. */
+  private def extractValueToString(lhs: tpd.Tree)(using dctx: DefContext): xt.Expr = {
+    def strip(tpe: xt.Type): xt.Type = tpe match {
+      case xt.AnnotatedType(tp, _) => strip(tp)
+      case _ => tpe
+    }
+    strip(extractType(lhs)(using dctx.setResolveTypes(true)).stripToplevelRefinement) match {
+      case xt.StringType() => extractTree(lhs)
+      case xt.BooleanType() =>
+        xt.IfExpr(extractTree(lhs), xt.StringLiteral("true").setPos(lhs.sourcePos), xt.StringLiteral("false").setPos(lhs.sourcePos))
+      case tpe =>
+        xt.FunctionInvocation(getIdentifier(valueToStringSym), Seq(tpe), Seq(extractTree(lhs)))
+    }
+  }
+
   private def extractCall(tr: tpd.Tree, rec: Option[tpd.Tree], sym: Symbol, tps: Seq[tpd.Tree], args: Seq[tpd.Tree])(using dctx: DefContext): xt.Expr = {
     if (isSyntheticArrayAccessor(sym))
       outOfSubsetError(tr, s"Stainless does not support references to the synthetic accessor `${sym.name.toString}`")
     rec match {
+    case Some(lhs) if isUnextractedToString(lhs, sym, args) =>
+      extractValueToString(lhs).setPos(tr.sourcePos)
+
     // A super call within a trait, which the compiler calls through a super accessor of the trait
     case None | Some(This(_)) if sym.name.is(NameKinds.SuperAccessorName) =>
       val trt = sym.owner
@@ -2438,7 +2489,7 @@ class CodeExtraction(inoxCtx: inox.Context,
         xt.Application(extractTree(lhs), args.map(extractTree)).setPos(pi)
 
       case tpe => (tpe, sym.name.decode.toString, args) match {
-        case (xt.StringType(), "+", Seq(rhs)) => xt.StringConcat(extractTree(lhs), extractTree(rhs))
+        case (xt.StringType(), "+", Seq(rhs)) => xt.StringConcat(extractTree(lhs), extractToString(rhs))
         case (xt.IntegerType() | xt.BVType(_,_) | xt.RealType() | xt.FPType(_,_), "+", Seq(rhs)) =>
           injectCasts(xt.Plus.apply)(lhs, rhs)
 
@@ -3230,15 +3281,15 @@ class CodeExtraction(inoxCtx: inox.Context,
 
   // @extern function may contain constructs that are not supported by Stainless.
   // However, we must be sure that we have captured all contracts.
-  // For instance, the following function uses the `.toString` method that we do not support:
+  // For instance, the following function uses the `.hashCode` method that we do not support:
   //   @extern
   //   def f(x: BigInt, y: BigInt): Unit = {
   //     require(x >= 10)
-  //     val t = x.toString
+  //     val t = x.hashCode
   //     ...
   //   }
   // We will recognize the `require(x >= 10)` as a spec.
-  // The extraction will stop at `val t = x.toString` and replace it (and the rest of the function) with a NoTree.
+  // The extraction will stop at `val t = x.hashCode` and replace it (and the rest of the function) with a NoTree.
   // This is fine if there is no further specs, as the body of @extern function are meant to be removed anyway.
   // On the other hand, if a spec appears further, that spec won't be extracted, which is problematic because
   // the implementation may rely on such assumption.
@@ -3246,7 +3297,7 @@ class CodeExtraction(inoxCtx: inox.Context,
   //   @extern
   //   def f(x: BigInt, y: BigInt): Unit = {
   //     require(x >= 10)
-  //     val t = x.toString
+  //     val t = x.hashCode
   //     require(x >= y)
   //     ...
   //   }
