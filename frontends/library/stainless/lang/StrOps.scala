@@ -24,8 +24,8 @@ object StrOps {
   }
 
   /**
-   * The string of `x`, as `x.toString`, which Stainless extracts to it when `x` has no
-   * `toString` that Stainless extracts (as for numbers, type parameters or case classes).
+   * The string of `x`, as `x.toString`, which Stainless extracts to it when `x` isn't an instance
+   * of a class of the program, a string or a boolean (as for numbers or type parameters).
    * Stainless keeps it uninterpreted: it only depends on the value of `x`.
    */
   @library @extern @pure

@@ -673,13 +673,17 @@ The ``s`` and ``raw`` string interpolators are supported, as is ``+`` with a str
 concatenate the literal parts with the ``toString`` of the other values. The ``f`` interpolator is not
 supported.
 
-``x.toString`` calls the ``toString`` that the type of ``x`` defines or inherits from a class of the
-program, and is ``"true"`` or ``"false"`` for a ``Boolean``. For other values (numbers, values of type
-parameters, and instances of classes that don't override ``toString``, including case classes, even
-when a subclass overrides it), Stainless treats it as an
-uninterpreted function: nothing is known about its result, except that it only depends on the value
-of ``x``. A class that doesn't override ``toString`` shows its address on the JVM, so two equal
-instances of it may not have the same string there.
+``x.toString`` calls the ``toString`` method of the class of ``x``, with dynamic dispatch. Stainless
+gives a class that doesn't define one the ``toString`` of the JVM: a case class shows its name and
+the strings of its fields, as ``Point(1,2)``, and a case object shows its name. Other classes (whose
+instances show their address on the JVM) get an uninterpreted method: nothing is known about its
+result, except that it only depends on the value of the instance, so two instances that Stainless
+considers equal have the same string, even if they may not on the JVM.
+
+A ``String`` is its own string, and a ``Boolean`` is ``"true"`` or ``"false"``. For other values
+(numbers, characters, values of type parameters and of local classes, functions, sets, maps and arrays),
+``toString`` is the uninterpreted function ``stainless.lang.StrOps.valueToString``, which also only
+depends on its argument.
 
 Real
 ****

@@ -752,6 +752,11 @@ class CodeExtraction(inoxCtx: inox.Context,
 
     methods ++= extractParentArguments(sym, template, classType, inLibrary)(using tpCtx)
 
+    classType match {
+      case ct: xt.ClassType => methods ++= extractSyntheticToString(sym, ct, annots)(using tpCtx)
+      case _ =>
+    }
+
     val optInv = if (invariants.isEmpty) None else Some({
       val id = symbolMapping.fetchInvIdForClass(sym)
       val pos = inox.utils.Position.between(invariants.map(_.getPos).min, invariants.map(_.getPos).max)
@@ -2354,26 +2359,92 @@ class CodeExtraction(inoxCtx: inox.Context,
   }
 
   /** The string of `tree`, as `tree.toString`. */
-  private def extractToString(tree: tpd.Tree)(using dctx: DefContext): xt.Expr = {
-    val sym = tree.tpe.widen.member(nme.toString_).suchThat(_.info.firstParamTypes.isEmpty).symbol
-    extractCall(tree, Some(tree), if (sym.exists) sym else defn.Any_toString, Seq.empty, Seq.empty)
+  private def extractToString(tree: tpd.Tree)(using dctx: DefContext): xt.Expr =
+    extractCall(tree, Some(tree), toStringMember(tree.tpe.widen), Seq.empty, Seq.empty)
+
+  /** The `toString` member of `tpe`, as the compiler resolves it. */
+  private def toStringMember(tpe: Type): Symbol = {
+    val sym = tpe.member(nme.toString_).suchThat(_.info.firstParamTypes.isEmpty).symbol
+    if (sym.exists) sym else defn.Any_toString
   }
 
-  /** Whether `sym` is a `toString` that Stainless doesn't extract, as it isn't defined in the user's
-    * classes (but in `Any`, `Int`, `BigInt`, ...) or the compiler synthesized it (in case classes). */
-  private def isUnextractedToString(lhs: tpd.Tree, sym: Symbol, args: Seq[tpd.Tree])(using dctx: DefContext): Boolean =
-    sym.name == nme.toString_ && args.isEmpty && sym.info.firstParamTypes.isEmpty && {
-      val owner = sym.owner
-      (sym `is` Synthetic) || owner == defn.AnyClass || owner == defn.ObjectClass || (owner `is` JavaDefined) ||
-      isIgnored(owner.typeRef) || (extractType(lhs)(using dctx.setResolveTypes(true)).stripToplevelRefinement match {
-        case _: (xt.ClassType | xt.LocalClassType) => false
-        case xt.AnnotatedType(_: (xt.ClassType | xt.LocalClassType), _) => false
-        case _ => true
-      })
-    }
+  private def isToStringCall(sym: Symbol, args: Seq[tpd.Tree]): Boolean =
+    sym.name == nme.toString_ && args.isEmpty && sym.info.firstParamTypes.isEmpty
 
-  /** The string of `lhs`, for a `toString` that Stainless doesn't extract: `lhs` itself for a string, and
-    * otherwise the uninterpreted `StrOps.valueToString`, which only depends on the value of `lhs`. */
+  /** Whether the `toString` method `sym` isn't one of the program: the one of `Any`, those of Java and
+    * ignored classes, and those that the compiler synthesizes for case classes. */
+  private def isUnextractedToString(sym: Symbol): Boolean = {
+    val owner = sym.owner
+    (sym `is` Synthetic) || owner == defn.AnyClass || owner == defn.ObjectClass || (owner `is` JavaDefined) ||
+      isIgnored(owner.typeRef)
+  }
+
+  /** How Stainless gives a class a synthetic `toString` method, when the class has no `toString` of
+    * the program, and doesn't inherit one from a class that gets a synthetic one. */
+  private enum SyntheticToString {
+    /** For a case class, `C(x,y)` with the strings of the fields, or the name of a case object, as on the JVM */
+    case CaseClass
+    /** An abstract method, in an abstract class or trait */
+    case Abstract
+    /** An uninterpreted (`@extern` and `@pure`) method, as the JVM shows the address of instances */
+    case Uninterpreted
+  }
+
+  /** The parents of the class `cls` that Stainless extracts. */
+  private def extractedParentClasses(cls: Symbol): Seq[Symbol] =
+    cls.info.parents.filter(isValidParentType(_)).map(_.classSymbol).filterNot(_ `is` JavaDefined)
+
+  private def syntheticToString(cls: Symbol): Option[SyntheticToString] = {
+    val member = toStringMember(cls.thisType)
+    if (!cls.isClass || (cls `is` JavaDefined) || cls == defn.AnyClass || isIgnored(cls.typeRef)) None
+    else if (!isUnextractedToString(member)) None
+    else if (member `is` Synthetic) Option.when(member.owner == cls)(SyntheticToString.CaseClass)
+    else {
+      // The singleton cases of enums are extracted without their class: their enum declares a concrete method
+      val isAbstract = (cls `isOneOf` AbstractOrTrait) && !(cls `is` Enum)
+      val parents = extractedParentClasses(cls)
+      if (parents.isEmpty) Some(if (isAbstract) SyntheticToString.Abstract else SyntheticToString.Uninterpreted)
+      else Option.when(!isAbstract && parents.forall(_ `isOneOf` AbstractOrTrait))(SyntheticToString.Uninterpreted)
+    }
+  }
+
+  /** The class that declares the synthetic `toString` method that the class `cls` has or inherits. */
+  private def syntheticToStringProvider(cls: Symbol): Option[Symbol] =
+    if (syntheticToString(cls).isDefined) Some(cls)
+    else extractedParentClasses(cls).iterator.flatMap(syntheticToStringProvider).nextOption()
+
+  private def syntheticToStringId(cls: Symbol): SymbolIdentifier =
+    symbolMapping.fetchToStringIdForClass(cls, defn.Any_toString)
+
+  /** The synthetic `toString` method of the class `cls`, if it gets one (see [[syntheticToString]]). */
+  private def extractSyntheticToString(cls: ClassSymbol, classType: xt.ClassType, classFlags: Seq[xt.Flag])
+                                      (using dctx: DefContext): Option[xt.FunDef] = {
+    given pos: SourcePosition = cls.sourcePos
+    val accessors = cls.paramAccessors.filter(acc => acc.is(CaseAccessor) && acc.isTerm && !acc.is(Method))
+    val printable = accessors.forall(acc => !isIgnoredParameterType(acc.info) && !annotationsOf(acc).contains(xt.Ghost))
+    val flags = xt.DropVCs +: classFlags.filter(_.name == "library")
+    syntheticToString(cls).map {
+      case SyntheticToString.CaseClass if printable =>
+        val name = cls.name.stripModuleClassSuffix.decode.toString
+        val fields = accessors.map(acc => extractToString(tpd.TreeOps(tpd.This(cls)).select(acc)))
+        val parts =
+          if (cls `is` ModuleClass) Seq(xt.StringLiteral(name).setPos(pos))
+          else Seq(xt.StringLiteral(name + "(").setPos(pos)) ++
+            fields.zipWithIndex.flatMap((f, i) => (if (i > 0) Seq(xt.StringLiteral(",").setPos(pos)) else Seq()) :+ f) ++
+            Seq(xt.StringLiteral(")").setPos(pos))
+        (parts.reduceLeft((acc, str) => xt.StringConcat(acc, str).setPos(pos)), flags)
+      case SyntheticToString.Abstract =>
+        (xt.NoTree(xt.StringType().setPos(pos)).setPos(pos), flags :+ xt.IsAbstract)
+      case _ =>
+        (xt.NoTree(xt.StringType().setPos(pos)).setPos(pos), flags ++ Seq(xt.Extern, xt.IsPure))
+    }.map { (body, flags) =>
+      new xt.FunDef(syntheticToStringId(cls), Seq.empty, Seq.empty, xt.StringType().setPos(pos), body, flags).setPos(pos)
+    }
+  }
+
+  /** The string of `lhs`, for a `toString` method that isn't one of the program: the synthetic `toString`
+    * method of its class (see [[syntheticToString]]), `lhs` itself for a string, `"true"` or `"false"` for a
+    * boolean, and otherwise the uninterpreted `StrOps.valueToString`, which only depends on the value of `lhs`. */
   private def extractValueToString(lhs: tpd.Tree)(using dctx: DefContext): xt.Expr = {
     def strip(tpe: xt.Type): xt.Type = tpe match {
       case xt.AnnotatedType(tp, _) => strip(tp)
@@ -2383,16 +2454,27 @@ class CodeExtraction(inoxCtx: inox.Context,
       case xt.StringType() => extractTree(lhs)
       case xt.BooleanType() =>
         xt.IfExpr(extractTree(lhs), xt.StringLiteral("true").setPos(lhs.sourcePos), xt.StringLiteral("false").setPos(lhs.sourcePos))
+      case ct: xt.ClassType if syntheticToStringProvider(lhs.tpe.widen.classSymbol).isDefined =>
+        val cls = syntheticToStringProvider(lhs.tpe.widen.classSymbol).get
+        xt.MethodInvocation(extractTree(lhs), syntheticToStringId(cls), Seq.empty, Seq.empty)
       case tpe =>
         xt.FunctionInvocation(getIdentifier(valueToStringSym), Seq(tpe), Seq(extractTree(lhs)))
     }
   }
 
+  /** Whether `lhs` is an instance of a (non-local) class of the program. */
+  private def isClassReceiver(lhs: tpd.Tree)(using dctx: DefContext): Boolean =
+    extractType(lhs)(using dctx.setResolveTypes(true)).stripToplevelRefinement match {
+      case _: xt.ClassType => true
+      case xt.AnnotatedType(_: xt.ClassType, _) => true
+      case _ => false
+    }
+
   private def extractCall(tr: tpd.Tree, rec: Option[tpd.Tree], sym: Symbol, tps: Seq[tpd.Tree], args: Seq[tpd.Tree])(using dctx: DefContext): xt.Expr = {
     if (isSyntheticArrayAccessor(sym))
       outOfSubsetError(tr, s"Stainless does not support references to the synthetic accessor `${sym.name.toString}`")
     rec match {
-    case Some(lhs) if isUnextractedToString(lhs, sym, args) =>
+    case Some(lhs) if isToStringCall(sym, args) && (isUnextractedToString(sym) || !isClassReceiver(lhs)) =>
       extractValueToString(lhs).setPos(tr.sourcePos)
 
     // A super call within a trait, which the compiler calls through a super accessor of the trait
