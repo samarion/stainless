@@ -82,6 +82,12 @@ These options are available to all Stainless components:
 
   Reduces the components' summaries to only the invalid elements (e.g. invalid VC).
 
+* ``--trusted-base``
+
+  After the summary, lists the ``@extern`` functions, methods, classes and fields of the program
+  (outside the library), with their annotations and contracts. Verification assumes these
+  contracts without checking them, so this list is what the verification result trusts.
+
 * ``--debug=d1,d2,...``
 
   Enables printing detailed messages for the components d1,d2,... .

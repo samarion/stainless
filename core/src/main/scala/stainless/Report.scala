@@ -60,6 +60,25 @@ trait AbstractReport[SelfType <: AbstractReport[SelfType]] { self: SelfType =>
     val asciiOnly = ctx.options.findOptionOrDefault(inox.optNoColors)
     ctx.reporter.info(table.render(asciiOnly))
     ctx.reporter.info(emitSummary(ctx))
+    if (ctx.options.findOptionOrDefault(optTrustedBase))
+      ctx.reporter.info(emitTrustedBase(ctx))
+  }
+
+  /** Lists the user @extern definitions, whose contracts verification assumes. */
+  private def emitTrustedBase(ctx: inox.Context): String = {
+    val trusted = prepareExtractionSummaryData.constructsUsage.trusted.toSeq
+      .sortBy(d => (d.position.file.getPath, d.position.line, d.position.col, d.id.name))
+    if (trusted.isEmpty) "Trusted base: no @extern definitions"
+    else {
+      val entries = trusted.map { d =>
+        val name = d.owner.map(o => s"${o.name}.${d.id.name}").getOrElse(d.id.name)
+        val annotations = (Seq("@extern") ++ d.annotations).mkString(" ")
+        val header = s"  ${d.position.file.getName}:${d.position.line}:${d.position.col}: ${d.kind.description} $name ($annotations)"
+        (header +: d.contract.map(c => s"      $c")).mkString("\n")
+      }
+      s"""Trusted base (${trusted.size} @extern definitions):
+         |${entries.mkString("\n")}""".stripMargin
+    }
   }
 
   /** Create a new report with *only* the information about the given functions/classes/... */

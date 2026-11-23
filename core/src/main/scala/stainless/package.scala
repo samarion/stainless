@@ -28,6 +28,8 @@ package object stainless {
   object optExtendedSummary extends inox.FlagOptionDef("extended-summary", false)
   def isExtendedSummaryOn(using ctx: inox.Context): Boolean = ctx.options.findOptionOrDefault(optExtendedSummary)
 
+  object optTrustedBase extends inox.FlagOptionDef("trusted-base", false)
+
   type Program = inox.Program { val trees: ast.Trees }
 
   type StainlessProgram = Program { val trees: stainless.trees.type }
