@@ -159,6 +159,10 @@ trait ASTExtractors {
     }.toMap
   }
 
+  /** `stainless.lang.StrOps.valueToString`, the uninterpreted `toString` of values. */
+  protected lazy val valueToStringSym: Symbol =
+    moduleFromName("stainless.lang.StrOps").moduleClass.info.decl(termName("valueToString")).symbol
+
   protected lazy val optionSymbol = classFromName("stainless.lang.Option")
   protected lazy val someSymbol   = classFromName("stainless.lang.Some")
   protected lazy val noneSymbol   = classFromName("stainless.lang.None")
@@ -828,6 +832,26 @@ trait ASTExtractors {
         case Apply(TypeApply(ExSymbol("scala", "Array$", "empty"), List(tpt)), ctags) =>
           Some((tpt.tpe, Nil))
 
+        case _ =>
+          None
+      }
+    }
+
+    /** A string interpolation `s"..."` or `raw"..."`: the literal parts, with the escapes of `s`
+      * processed, and the arguments between them (one fewer than the parts). */
+    object ExStringInterpolation {
+      private lazy val interpolatorSyms: Map[Symbol, String => String] = Map(
+        defn.StringContext_s -> (StringContext.processEscapes(_)),
+        defn.StringContext_raw -> identity[String],
+      )
+
+      def unapply(tree: tpd.Apply): Option[(Seq[String], Seq[tpd.Tree])] = tree match {
+        case Apply(sel @ Select(ctx @ Apply(_, List(Typed(SeqLiteral(parts, _), _))), _), List(Typed(SeqLiteral(args, _), _)))
+            if ctx.fun.symbol == defn.StringContextModule_apply && interpolatorSyms.contains(sel.symbol) &&
+              parts.size == args.size + 1 =>
+          val literals = parts.collect { case Literal(Constant(part: String)) => part }
+          if (literals.size == parts.size) Some((literals.map(interpolatorSyms(sel.symbol)), args))
+          else None
         case _ =>
           None
       }

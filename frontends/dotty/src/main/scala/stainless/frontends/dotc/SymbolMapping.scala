@@ -97,6 +97,16 @@ class SymbolMapping {
       })
   }
 
+  /** Mapping for synthetic `toString` methods: class' id -> method's id. */
+  private val toStrings = MutableMap[SymbolIdentifier, SymbolIdentifier]()
+
+  /** Get the identifier for the synthetic `toString` method of the class [[sym]]. It has the symbol of
+    * `Any.toString`, like the `toString` methods of the program, so that they override it. */
+  def fetchToStringIdForClass(sym: Symbol, anyToString: Symbol)(using Context): SymbolIdentifier = {
+    val id = fetch(sym, Plain)
+    toStrings.getOrElseUpdate(id, SymbolIdentifier(fetch(anyToString, Plain).symbol))
+  }
+
   /** Get the identifier for the class invariant of [[sym]]. */
   def fetchInvIdForClass(sym: Symbol)(implicit ctx: Context): SymbolIdentifier = {
     val id = fetch(sym, Plain)

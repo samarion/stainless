@@ -1,0 +1,3 @@
+[ Error  ] FormatInterpolator.scala:2:27: Stainless does not support the `f` string interpolator, only `s` and `raw`
+             def f(x: Int): String = f"$x%d"
+                                     ^^^^^^^

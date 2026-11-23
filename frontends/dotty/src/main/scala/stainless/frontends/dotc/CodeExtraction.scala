@@ -593,6 +593,7 @@ class CodeExtraction(inoxCtx: inox.Context,
     val flags = annots ++
       (if (isValueClass) Some(xt.ValueClass) else None) ++
       (if (isAbstractClass) Some(xt.IsAbstract) else None) ++
+      (if (isExtensible(sym)) Some(xt.IsExtensible) else None) ++
       (if (sym `is` Sealed) Some(xt.IsSealed) else None) ++
       (if ((sym `is` ModuleClass) && (sym `is` Case)) Some(xt.IsCaseObject) else None) ++
       (if (sym `is` ModuleClass) Some(xt.IsObject) else None) ++
@@ -749,6 +750,13 @@ class CodeExtraction(inoxCtx: inox.Context,
         reporter.warning(other.sourcePos, s"In class $id, Stainless does not support:\n$other")
     }
 
+    methods ++= extractParentArguments(sym, template, classType, inLibrary)(using tpCtx)
+
+    classType match {
+      case ct: xt.ClassType => methods ++= extractSyntheticToString(sym, ct, annots)(using tpCtx)
+      case _ =>
+    }
+
     val optInv = if (invariants.isEmpty) None else Some({
       val id = symbolMapping.fetchInvIdForClass(sym)
       val pos = inox.utils.Position.between(invariants.map(_.getPos).min, invariants.map(_.getPos).max)
@@ -776,6 +784,68 @@ class CodeExtraction(inoxCtx: inox.Context,
     ).setPos(sym.sourcePos)
 
     (xcd, allMethods ++ memberFunctions, allTypeMembers ++ memberTypeDefs, memberClasses)
+  }
+
+  // The overrides of the accessors of concrete parents' fields, see `extractParentArguments`
+  private val parentArgumentIds = MutableMap[(Symbol, Symbol), SymbolIdentifier]()
+
+  /** The arguments that the class `sym` passes to the constructor of a concrete parent class `C`, as
+    * overrides of the accessors of the fields of `C`: `class D(y: BigInt) extends C(y * 2)` gets the
+    * method `def x: BigInt = this.y * 2` for the field `x` of `C`.
+    *
+    * As the arguments may only refer to the constructor parameters of `sym`, which are its fields, they
+    * are evaluated in each access instead of once at construction. [[xlang.ConcreteParents]] then makes
+    * the accessors of the fields of `C` abstract.
+    */
+  private def extractParentArguments(sym: ClassSymbol, template: tpd.Template, classType: xt.ClassType | xt.LocalClassType, inLibrary: Boolean)
+                                    (using dctx: DefContext): Seq[xt.FunDef] = {
+    def constructorArgs(t: tpd.Tree): Option[List[tpd.Tree]] = t match {
+      case Apply(fn, args) => constructorArgs(fn).map(_ ++ args)
+      case TypeApply(fn, _) => constructorArgs(fn)
+      case Select(New(_), nme.CONSTRUCTOR) => Some(Nil)
+      case _ => None
+    }
+
+    val thiss = classType match {
+      case ct: xt.ClassType => xt.This(ct)
+      case lct: xt.LocalClassType => xt.LocalThis(lct)
+    }
+
+    // The constructor parameters of `sym` stand for its fields
+    val ownFields = sym.paramAccessors.filter(acc => acc.isTerm && !acc.is(Method))
+    val paramVars: Map[Symbol, () => xt.Expr] = template.constr.termParamss.flatten.flatMap { vd =>
+      ownFields.find(_.name == vd.name).filterNot(acc => isIgnoredParameterType(acc.info)).toSeq.flatMap { acc =>
+        val sel = () => classSelector(classType, thiss, getIdentifier(acc))
+        Seq(vd.symbol -> sel, acc -> sel)
+      }
+    }.toMap
+    val argCtx = dctx.copy(vars = dctx.vars ++ paramVars)
+
+    template.parents.filter(isValidParent(_, inLibrary)).flatMap { parent =>
+      val psym = parent.tpe.typeSymbol
+      val fields = if (psym.isClass && !(psym `isOneOf` AbstractOrTrait)) psym.asClass.paramAccessors.filter(acc => acc.isTerm && !acc.is(Method)) else Nil
+      if (fields.isEmpty) Seq.empty
+      else {
+        val args = constructorArgs(parent).getOrElse(
+          outOfSubsetError(parent.sourcePos, s"Stainless does not support this call to the constructor of ${psym.name}"))
+        if (args.size != fields.size)
+          outOfSubsetError(parent.sourcePos, s"Stainless does not support this call to the constructor of ${psym.name}")
+
+        (fields zip args).filterNot((acc, _) => isIgnoredParameterType(acc.info)).map { (acc, arg) =>
+          val accessorId = getFieldAccessorIdentifier(acc)
+          val id = parentArgumentIds.getOrElseUpdate((sym, acc), SymbolIdentifier(accessorId.symbol))
+          val retType = stainlessType(parent.tpe.memberInfo(acc).widenExpr)(using dctx, arg.sourcePos)
+          new xt.FunDef(
+            id,
+            Seq.empty,
+            Seq.empty,
+            retType,
+            extractTree(arg)(using argCtx),
+            Seq(xt.Synthetic)
+          ).setPos(arg.sourcePos)
+        }
+      }
+    }
   }
 
   private def extractAccessor(classType: xt.ClassType | xt.LocalClassType, isAbstractClass: Boolean, vd: tpd.ValDef, fieldPos: Int)(using dctx: DefContext): Seq[xt.FunDef] = {
@@ -895,12 +965,19 @@ class CodeExtraction(inoxCtx: inox.Context,
     }
   }
 
+  // Concrete classes that Scala lets be extended (see `xlang.ConcreteParents`)
+  private def isExtensible(cls: Symbol): Boolean =
+    cls.isClass && !(cls `isOneOf` AbstractOrTrait) && !(cls `is` Final) && !(cls `is` ModuleClass)
+
   private def commonFunctionFlags(sym: Symbol, isAbstract: Boolean): Seq[xt.Flag] = {
+    // Subclasses override the accessors of the fields of extensible classes with the arguments they pass to
+    // their constructors, so these accessors aren't final (`xlang.ConcreteParents` adds the flag back)
+    val isFinal = sym.isEffectivelyFinal && !((sym `is` ParamAccessor) && isExtensible(sym.owner))
     var flags = annotationsOf(sym).filterNot(annot => annot == xt.IsMutable || annot.name == "inlineInvariant") ++
       (if ((sym `is` Implicit) && (sym `is` Synthetic)) Seq(xt.Inline, xt.Synthetic) else Seq()) ++
       (if (sym `is` Inline) Seq(xt.Inline) else Seq()) ++
       (if (sym `is` Private) Seq(xt.Private) else Seq()) ++
-      (if (sym.isEffectivelyFinal) Seq(xt.Final) else Seq()) ++
+      (if (isFinal) Seq(xt.Final) else Seq()) ++
       (if (isDefaultGetter(sym) || isCopyMethod(sym)) Seq(xt.Synthetic, xt.Inline) else Seq())
 
     if (sym.name == nme.unapply) {
@@ -1267,7 +1344,7 @@ class CodeExtraction(inoxCtx: inox.Context,
       // We only keep the fields of the constructor (and disregard the inherited ones)
       val fields = tpe.fields.filter { denot =>
         val sym = denot.symbol
-        !sym.is(Accessor) && (sym.is(ParamAccessor) || sym.is(CaseAccessor))
+        !sym.is(Accessor) && (sym.is(ParamAccessor) || sym.is(CaseAccessor)) && sym.owner == tpe.classSymbol
       }
       // We need to filter out ignored parameter types (e.g., ClassTag)
       fields.map(_.info).filter(tpe => !isIgnoredParameterType(tpe))
@@ -1784,6 +1861,19 @@ class CodeExtraction(inoxCtx: inox.Context,
     case ExArrayLiteral(tpe, args) =>
       xt.FiniteArray(extractSeq(args), extractType(tpe)(using dctx, tr.sourcePos))
 
+    // `s"a${x}b"` is `"a" + x.toString + "b"`
+    case ExStringInterpolation(parts, args) =>
+      def literal(part: String): Option[xt.Expr] =
+        Option.when(part.nonEmpty)(xt.StringLiteral(part).setPos(tr.sourcePos))
+      val strings = literal(parts.head).toSeq ++ args.zip(parts.tail).flatMap {
+        case (arg, part) => extractToString(arg) +: literal(part).toSeq
+      }
+      strings.reduceLeftOption((acc, str) => xt.StringConcat(acc, str).setPos(tr.sourcePos))
+        .getOrElse(xt.StringLiteral(""))
+
+    case Apply(fun, _) if fun.symbol == defn.StringContext_f =>
+      outOfSubsetError(tr, "Stainless does not support the `f` string interpolator, only `s` and `raw`")
+
     case s @ ExCaseObject(sym) =>
       extractType(s) match {
         case ct: xt.ClassType => xt.ClassConstructor(ct, Seq.empty)
@@ -2241,17 +2331,24 @@ class CodeExtraction(inoxCtx: inox.Context,
     case _: xt.ClassType =>
       xt.ClassSelector(lhs, fieldId)
     case lct: xt.LocalClassType =>
-      val lcd = dctx.localClasses(lct.id)
-      val field = lcd.fields.collectFirst { case vd @ xt.ValDef(`fieldId`, _, _) => vd }
-      xt.LocalClassSelector(lhs, fieldId, field.map(_.tpe).getOrElse(xt.Untyped))
+      // The field may be inherited from a concrete local parent (see `extractParentArguments`)
+      def findField(id: Identifier): Option[xt.ValDef] = dctx.localClasses.get(id).flatMap { lcd =>
+        lcd.fields.collectFirst { case vd @ xt.ValDef(`fieldId`, _, _) => vd }.orElse(
+          lcd.parents.collect { case p: xt.ClassType => p.id case p: xt.LocalClassType => p.id }.flatMap(findField).headOption)
+      }
+      xt.LocalClassSelector(lhs, fieldId, findField(lct.id).map(_.tpe).getOrElse(xt.Untyped))
   }
 
   private def methodInvocation(ct: xt.ClassType | xt.LocalClassType, lhs: xt.Expr, fnId: SymbolIdentifier, tps: Seq[xt.Type], args: Seq[xt.Expr])(using dctx: DefContext): xt.Expr = ct match {
     case _: xt.ClassType =>
       xt.MethodInvocation(lhs, fnId, tps, args)
     case lct: xt.LocalClassType =>
-      val lcd = dctx.localClasses(lct.id)
-      val fd = lcd.methods.find(_.id == fnId).get
+      // The method may be inherited from a local parent
+      def findMethod(id: Identifier): Option[xt.LocalMethodDef] = dctx.localClasses.get(id).flatMap { lcd =>
+        lcd.methods.find(_.id == fnId).orElse(
+          lcd.parents.collect { case p: xt.ClassType => p.id case p: xt.LocalClassType => p.id }.flatMap(findMethod).headOption)
+      }
+      val fd = findMethod(lct.id).getOrElse(outOfSubsetError(lhs.getPos, s"Stainless does not support this call to ${fnId.name}"))
       xt.LocalMethodInvocation(
         lhs,
         xt.ValDef(fnId, xt.FunctionType(fd.params.map(_.tpe), fd.returnType)).toVariable,
@@ -2261,10 +2358,138 @@ class CodeExtraction(inoxCtx: inox.Context,
       )
   }
 
+  /** The string of `tree`, as `tree.toString`. */
+  private def extractToString(tree: tpd.Tree)(using dctx: DefContext): xt.Expr =
+    extractCall(tree, Some(tree), toStringMember(tree.tpe.widen), Seq.empty, Seq.empty)
+
+  /** The `toString` member of `tpe`, as the compiler resolves it. */
+  private def toStringMember(tpe: Type): Symbol = {
+    val sym = tpe.member(nme.toString_).suchThat(_.info.firstParamTypes.isEmpty).symbol
+    if (sym.exists) sym else defn.Any_toString
+  }
+
+  private def isToStringCall(sym: Symbol, args: Seq[tpd.Tree]): Boolean =
+    sym.name == nme.toString_ && args.isEmpty && sym.info.firstParamTypes.isEmpty
+
+  /** Whether the `toString` method `sym` isn't one of the program: the one of `Any`, those of Java, Scala
+    * and ignored classes, and those that the compiler synthesizes for case classes. */
+  private def isUnextractedToString(sym: Symbol): Boolean = {
+    val owner = sym.owner
+    (sym `is` Synthetic) || owner == defn.AnyClass || owner == defn.ObjectClass || (owner `is` JavaDefined) ||
+      isIgnored(owner.typeRef) || owner.fullName.toString.startsWith("scala.") ||
+      annotationsOf(sym).contains(xt.Ignore)
+  }
+
+  /** How Stainless gives a class a synthetic `toString` method, when the class has no `toString` of
+    * the program, and doesn't inherit one from a class that gets a synthetic one. */
+  private enum SyntheticToString {
+    /** For a case class, `C(x,y)` with the strings of the fields, or the name of a case object, as on the JVM */
+    case CaseClass
+    /** An abstract method, in an abstract class or trait */
+    case Abstract
+    /** An uninterpreted (`@extern` and `@pure`) method, as the JVM shows the address of instances */
+    case Uninterpreted
+  }
+
+  /** The parents of the class `cls` that Stainless extracts. */
+  private def extractedParentClasses(cls: Symbol): Seq[Symbol] =
+    cls.info.parents.filter(isValidParentType(_)).map(_.classSymbol).filterNot(_ `is` JavaDefined)
+
+  private def syntheticToString(cls: Symbol): Option[SyntheticToString] = {
+    val member = toStringMember(cls.thisType)
+    // Stainless rejects the methods of a class with mutable type parameters that a subclass instantiates
+    // with its own non-mutable ones, so these classes don't get one
+    def hasMutableTypeParams = cls.typeParams.exists(tp => annotationsOf(tp).contains(xt.IsMutable))
+    if (!cls.isClass || (cls `is` JavaDefined) || cls == defn.AnyClass || isIgnored(cls.typeRef)) None
+    else if (hasMutableTypeParams && (cls `isOneOf` AbstractOrTrait)) None
+    else if (!isUnextractedToString(member)) None
+    else if (member `is` Synthetic) Option.when(member.owner == cls)(SyntheticToString.CaseClass)
+    else {
+      // The singleton cases of enums are extracted without their class: their enum declares a concrete method
+      val isAbstract = (cls `isOneOf` AbstractOrTrait) && !(cls `is` Enum)
+      val parents = extractedParentClasses(cls)
+      if (parents.isEmpty) Some(if (isAbstract) SyntheticToString.Abstract else SyntheticToString.Uninterpreted)
+      else Option.when(!isAbstract && parents.forall(_ `isOneOf` AbstractOrTrait))(SyntheticToString.Uninterpreted)
+    }
+  }
+
+  /** The class that declares the synthetic `toString` method that the class `cls` has or inherits. */
+  private def syntheticToStringProvider(cls: Symbol): Option[Symbol] =
+    if (syntheticToString(cls).isDefined) Some(cls)
+    else extractedParentClasses(cls).iterator.flatMap(syntheticToStringProvider).nextOption()
+
+  private def syntheticToStringId(cls: Symbol): SymbolIdentifier =
+    symbolMapping.fetchToStringIdForClass(cls, defn.Any_toString)
+
+  /** The synthetic `toString` method of the class `cls`, if it gets one (see [[syntheticToString]]). */
+  private def extractSyntheticToString(cls: ClassSymbol, classType: xt.ClassType, classFlags: Seq[xt.Flag])
+                                      (using dctx: DefContext): Option[xt.FunDef] = {
+    given pos: SourcePosition = cls.sourcePos
+    val accessors = cls.paramAccessors.filter(acc => acc.is(CaseAccessor) && acc.isTerm && !acc.is(Method))
+    // Ghost, internally mutable and extern fields can't be read here, and functions have no string (on the
+    // JVM, it shows their address): the method is then uninterpreted
+    val printable = accessors.forall { acc =>
+      val flags = annotationsOf(acc, ignoreOwner = true)
+      !isIgnoredParameterType(acc.info) && !flags.contains(xt.Ghost) && !flags.contains(xt.IsInternallyMutable) &&
+        !flags.contains(xt.Extern) && !defn.isFunctionType(acc.info.widenExpr.dealias)
+    }
+    val flags = xt.DropVCs +: classFlags.filter(_.name == "library")
+    syntheticToString(cls).map {
+      case SyntheticToString.CaseClass if printable =>
+        val name = cls.name.stripModuleClassSuffix.decode.toString
+        val fields = accessors.map(acc => extractToString(tpd.TreeOps(tpd.This(cls)).select(acc)))
+        val parts =
+          if (cls `is` ModuleClass) Seq(xt.StringLiteral(name).setPos(pos))
+          else Seq(xt.StringLiteral(name + "(").setPos(pos)) ++
+            fields.zipWithIndex.flatMap((f, i) => (if (i > 0) Seq(xt.StringLiteral(",").setPos(pos)) else Seq()) :+ f) ++
+            Seq(xt.StringLiteral(")").setPos(pos))
+        (parts.reduceLeft((acc, str) => xt.StringConcat(acc, str).setPos(pos)), flags)
+      case SyntheticToString.Abstract =>
+        (xt.NoTree(xt.StringType().setPos(pos)).setPos(pos), flags :+ xt.IsAbstract)
+      case _ =>
+        (xt.NoTree(xt.StringType().setPos(pos)).setPos(pos), flags ++ Seq(xt.Extern, xt.IsPure))
+    }.map { (body, flags) =>
+      new xt.FunDef(syntheticToStringId(cls), Seq.empty, Seq.empty, xt.StringType().setPos(pos), body, flags).setPos(pos)
+    }
+  }
+
+  /** The string of `lhs`, for a `toString` method that isn't one of the program: the synthetic `toString`
+    * method of its class (see [[syntheticToString]]), `lhs` itself for a string, `"true"` or `"false"` for a
+    * boolean, and otherwise the uninterpreted `StrOps.valueToString`, which only depends on the value of `lhs`. */
+  private def extractValueToString(lhs: tpd.Tree)(using dctx: DefContext): xt.Expr = {
+    def strip(tpe: xt.Type): xt.Type = tpe match {
+      case xt.AnnotatedType(tp, _) => strip(tp)
+      case _ => tpe
+    }
+    strip(extractType(lhs)(using dctx.setResolveTypes(true)).stripToplevelRefinement) match {
+      case xt.StringType() => extractTree(lhs)
+      case xt.BooleanType() =>
+        xt.IfExpr(extractTree(lhs), xt.StringLiteral("true").setPos(lhs.sourcePos), xt.StringLiteral("false").setPos(lhs.sourcePos))
+      case _: (xt.FunctionType | xt.PiType) =>
+        outOfSubsetError(lhs, "Stainless does not support the string of a function")
+      case ct: xt.ClassType if syntheticToStringProvider(lhs.tpe.widen.classSymbol).isDefined =>
+        val cls = syntheticToStringProvider(lhs.tpe.widen.classSymbol).get
+        xt.MethodInvocation(extractTree(lhs), syntheticToStringId(cls), Seq.empty, Seq.empty)
+      case tpe =>
+        xt.FunctionInvocation(getIdentifier(valueToStringSym), Seq(tpe), Seq(extractTree(lhs)))
+    }
+  }
+
+  /** Whether `lhs` is an instance of a (non-local) class of the program. */
+  private def isClassReceiver(lhs: tpd.Tree)(using dctx: DefContext): Boolean =
+    extractType(lhs)(using dctx.setResolveTypes(true)).stripToplevelRefinement match {
+      case _: xt.ClassType => true
+      case xt.AnnotatedType(_: xt.ClassType, _) => true
+      case _ => false
+    }
+
   private def extractCall(tr: tpd.Tree, rec: Option[tpd.Tree], sym: Symbol, tps: Seq[tpd.Tree], args: Seq[tpd.Tree])(using dctx: DefContext): xt.Expr = {
     if (isSyntheticArrayAccessor(sym))
       outOfSubsetError(tr, s"Stainless does not support references to the synthetic accessor `${sym.name.toString}`")
     rec match {
+    case Some(lhs) if isToStringCall(sym, args) && (isUnextractedToString(sym) || !isClassReceiver(lhs)) =>
+      extractValueToString(lhs).setPos(tr.sourcePos)
+
     // A super call within a trait, which the compiler calls through a super accessor of the trait
     case None | Some(This(_)) if sym.name.is(NameKinds.SuperAccessorName) =>
       val trt = sym.owner
@@ -2359,7 +2584,7 @@ class CodeExtraction(inoxCtx: inox.Context,
         xt.Application(extractTree(lhs), args.map(extractTree)).setPos(pi)
 
       case tpe => (tpe, sym.name.decode.toString, args) match {
-        case (xt.StringType(), "+", Seq(rhs)) => xt.StringConcat(extractTree(lhs), extractTree(rhs))
+        case (xt.StringType(), "+", Seq(rhs)) => xt.StringConcat(extractTree(lhs), extractToString(rhs))
         case (xt.IntegerType() | xt.BVType(_,_) | xt.RealType() | xt.FPType(_,_), "+", Seq(rhs)) =>
           injectCasts(xt.Plus.apply)(lhs, rhs)
 
@@ -3151,15 +3376,15 @@ class CodeExtraction(inoxCtx: inox.Context,
 
   // @extern function may contain constructs that are not supported by Stainless.
   // However, we must be sure that we have captured all contracts.
-  // For instance, the following function uses the `.toString` method that we do not support:
+  // For instance, the following function uses the `.hashCode` method that we do not support:
   //   @extern
   //   def f(x: BigInt, y: BigInt): Unit = {
   //     require(x >= 10)
-  //     val t = x.toString
+  //     val t = x.hashCode
   //     ...
   //   }
   // We will recognize the `require(x >= 10)` as a spec.
-  // The extraction will stop at `val t = x.toString` and replace it (and the rest of the function) with a NoTree.
+  // The extraction will stop at `val t = x.hashCode` and replace it (and the rest of the function) with a NoTree.
   // This is fine if there is no further specs, as the body of @extern function are meant to be removed anyway.
   // On the other hand, if a spec appears further, that spec won't be extracted, which is problematic because
   // the implementation may rely on such assumption.
@@ -3167,7 +3392,7 @@ class CodeExtraction(inoxCtx: inox.Context,
   //   @extern
   //   def f(x: BigInt, y: BigInt): Unit = {
   //     require(x >= 10)
-  //     val t = x.toString
+  //     val t = x.hashCode
   //     require(x >= y)
   //     ...
   //   }

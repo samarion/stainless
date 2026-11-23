@@ -22,4 +22,12 @@ object StrOps {
   def bigSubstring(s: String, start: BigInt, end: BigInt): String = {
     s.substring(start.toInt, end.toInt)
   }
+
+  /**
+   * The string of `x`, as `x.toString`, which Stainless extracts to it when `x` isn't an instance
+   * of a class of the program, a string or a boolean (as for numbers or type parameters).
+   * Stainless keeps it uninterpreted: it only depends on the value of `x`.
+   */
+  @library @extern @pure
+  def valueToString[@mutable T](x: T): String = x.toString
 }

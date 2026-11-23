@@ -657,6 +657,34 @@ An ``Int`` or a ``Long`` converts to the ``BigInt`` of the same value, explicitl
 through Scala's implicit conversion (``val b: BigInt = x``). Other arguments of ``BigInt(...)`` must be
 literals.
 
+String
+******
+
+.. code-block:: scala
+
+  val s = "Hello"
+  s + ", world"
+  s.bigLength()
+  s.bigSubstring(1, 3)
+  s"Unknown $id in ${ids.size} ids"
+  "x = " + x
+
+The ``s`` and ``raw`` string interpolators are supported, as is ``+`` with a string on the left: they
+concatenate the literal parts with the ``toString`` of the other values. The ``f`` interpolator is not
+supported.
+
+``x.toString`` calls the ``toString`` method of the class of ``x``, with dynamic dispatch. Stainless
+gives a class that doesn't define one the ``toString`` of the JVM: a case class shows its name and
+the strings of its fields, as ``Point(1,2)``, and a case object shows its name. Other classes (whose
+instances show their address on the JVM) get an uninterpreted method: nothing is known about its
+result, except that it only depends on the value of the instance, so two instances that Stainless
+considers equal have the same string, even if they may not on the JVM.
+
+A ``String`` is its own string, and a ``Boolean`` is ``"true"`` or ``"false"``. For other values
+(numbers, characters, values of type parameters and of local classes, functions, sets, maps and arrays),
+``toString`` is the uninterpreted function ``stainless.lang.StrOps.valueToString``, which also only
+depends on its argument.
+
 Real
 ****
 
