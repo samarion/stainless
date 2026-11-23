@@ -2371,12 +2371,13 @@ class CodeExtraction(inoxCtx: inox.Context,
   private def isToStringCall(sym: Symbol, args: Seq[tpd.Tree]): Boolean =
     sym.name == nme.toString_ && args.isEmpty && sym.info.firstParamTypes.isEmpty
 
-  /** Whether the `toString` method `sym` isn't one of the program: the one of `Any`, those of Java and
-    * ignored classes, and those that the compiler synthesizes for case classes. */
+  /** Whether the `toString` method `sym` isn't one of the program: the one of `Any`, those of Java, Scala
+    * and ignored classes, and those that the compiler synthesizes for case classes. */
   private def isUnextractedToString(sym: Symbol): Boolean = {
     val owner = sym.owner
     (sym `is` Synthetic) || owner == defn.AnyClass || owner == defn.ObjectClass || (owner `is` JavaDefined) ||
-      isIgnored(owner.typeRef)
+      isIgnored(owner.typeRef) || owner.fullName.toString.startsWith("scala.") ||
+      annotationsOf(sym).contains(xt.Ignore)
   }
 
   /** How Stainless gives a class a synthetic `toString` method, when the class has no `toString` of
@@ -2396,7 +2397,11 @@ class CodeExtraction(inoxCtx: inox.Context,
 
   private def syntheticToString(cls: Symbol): Option[SyntheticToString] = {
     val member = toStringMember(cls.thisType)
+    // Stainless rejects the methods of a class with mutable type parameters that a subclass instantiates
+    // with its own non-mutable ones, so these classes don't get one
+    def hasMutableTypeParams = cls.typeParams.exists(tp => annotationsOf(tp).contains(xt.IsMutable))
     if (!cls.isClass || (cls `is` JavaDefined) || cls == defn.AnyClass || isIgnored(cls.typeRef)) None
+    else if (hasMutableTypeParams && (cls `isOneOf` AbstractOrTrait)) None
     else if (!isUnextractedToString(member)) None
     else if (member `is` Synthetic) Option.when(member.owner == cls)(SyntheticToString.CaseClass)
     else {
@@ -2421,7 +2426,13 @@ class CodeExtraction(inoxCtx: inox.Context,
                                       (using dctx: DefContext): Option[xt.FunDef] = {
     given pos: SourcePosition = cls.sourcePos
     val accessors = cls.paramAccessors.filter(acc => acc.is(CaseAccessor) && acc.isTerm && !acc.is(Method))
-    val printable = accessors.forall(acc => !isIgnoredParameterType(acc.info) && !annotationsOf(acc).contains(xt.Ghost))
+    // Ghost, internally mutable and extern fields can't be read here, and functions have no string (on the
+    // JVM, it shows their address): the method is then uninterpreted
+    val printable = accessors.forall { acc =>
+      val flags = annotationsOf(acc, ignoreOwner = true)
+      !isIgnoredParameterType(acc.info) && !flags.contains(xt.Ghost) && !flags.contains(xt.IsInternallyMutable) &&
+        !flags.contains(xt.Extern) && !defn.isFunctionType(acc.info.widenExpr.dealias)
+    }
     val flags = xt.DropVCs +: classFlags.filter(_.name == "library")
     syntheticToString(cls).map {
       case SyntheticToString.CaseClass if printable =>
@@ -2454,6 +2465,8 @@ class CodeExtraction(inoxCtx: inox.Context,
       case xt.StringType() => extractTree(lhs)
       case xt.BooleanType() =>
         xt.IfExpr(extractTree(lhs), xt.StringLiteral("true").setPos(lhs.sourcePos), xt.StringLiteral("false").setPos(lhs.sourcePos))
+      case _: (xt.FunctionType | xt.PiType) =>
+        outOfSubsetError(lhs, "Stainless does not support the string of a function")
       case ct: xt.ClassType if syntheticToStringProvider(lhs.tpe.widen.classSymbol).isDefined =>
         val cls = syntheticToStringProvider(lhs.tpe.widen.classSymbol).get
         xt.MethodInvocation(extractTree(lhs), syntheticToStringId(cls), Seq.empty, Seq.empty)
