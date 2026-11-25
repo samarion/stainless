@@ -335,6 +335,14 @@ trait TreeSanitizer { self =>
       ancestors.exists(tcd => !tcd.cd.flags.exists(_.name == "anyHeapRef") && tcd.cd.isAbstract && !tcd.cd.isSealed)
     }
 
+    /** Whether `==` on `ct` is a call to an `equals` method of its hierarchy (see `methods.UserEquality`). */
+    def definesEquals(ct: ClassType): Boolean = {
+      (ct.tcd +: ct.tcd.ancestors).exists(_.cd.methods.exists { id =>
+        val fd = symbols.getFunction(id)
+        id.name == "equals" && fd.params.map(_.tpe) == Seq(AnyType()) && fd.tparams.isEmpty && !fd.flags.contains(Synthetic)
+      })
+    }
+
     val ghostTraverser = new GhostTraverserImpl(self.trees)(using sanitizer.symbols)
 
     class GhostTraverserImpl(override val trees: self.trees.type)(using override val symbols: sanitizer.symbols.type)
@@ -351,6 +359,9 @@ trait TreeSanitizer { self =>
             case ct: ClassType if hasLocalSubClasses(ct.id) =>
               errors += MalformedStainlessCode(e,
                 "Testing classes with local subclasses for equality in non-ghost code is unsound")
+
+            case ct: ClassType if definesEquals(ct) =>
+              // The `equals` method of the class decides, whatever the subclasses are
 
             case ct: ClassType if isOrHasNonSealedAncestors(ct) =>
               errors += MalformedStainlessCode(e,

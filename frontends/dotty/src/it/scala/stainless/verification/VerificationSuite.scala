@@ -233,6 +233,9 @@ class VerificationSuite extends VerificationComponentTestSuite {
     "verification/valid/FloatingPointFunctionProperties",
     "verification/valid/FloatsToBits",
     "verification/invalid/FloatingPointFunctionsContradiction",
+    // With --feeling-lucky, the postcondition of a method of an open class that matches
+    // on a parameter of type Any is reported invalid, whatever the method
+    "verification/valid/UserEqualsOpen",
   )
 
   private val ignoreCheckFiles = Map(
