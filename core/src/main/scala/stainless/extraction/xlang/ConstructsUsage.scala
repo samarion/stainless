@@ -52,6 +52,26 @@ class ConstructsUsage(override val s: Trees)(override val t: s.type)(using overr
     private var classesUsage = Map.empty[UsedConstruct, Set[Identifier]]
     private var methodsOrInnerUsage = Map.empty[(UsedConstruct, Identifier), Set[MethodOrInner]]
     private var fieldsUsage = Map.empty[(UsedConstruct, Identifier), Set[Identifier]]
+    private var trusted = Set.empty[TrustedDefinition]
+
+    private given PrinterOptions = PrinterOptions.fromContext(context)
+
+    /** Records a user @extern definition, with its contract, for the trusted-base report. */
+    private def recordTrusted(kind: TrustedKind, id: Identifier, owner: Option[Identifier],
+                              pos: inox.utils.Position, flags: Seq[Flag], fullBody: Option[Expr]): Unit = {
+      if (isLib) return
+      val annotations = flags.collect {
+        case IsPure => "@pure"
+        case Ghost => "@ghost"
+        case Annotation(name, Seq()) if name == "nondet" => "@nondet"
+      }
+      val contract = fullBody.toSeq.flatMap(body => exprOps.BodyWithSpecs(body).specs).collect {
+        case exprOps.Precondition(pre) => s"require(${pre.asString})"
+        case exprOps.Postcondition(Lambda(params, post)) =>
+          s"ensuring(${params.map(_.id.asString).mkString(", ")} => ${post.asString})"
+      }
+      trusted += TrustedDefinition(kind, id, owner, pos, annotations, contract)
+    }
 
     enum Env {
       case OuterFreeFun // Outermost function i.e. `outermostId`
@@ -121,7 +141,7 @@ class ConstructsUsage(override val s: Trees)(override val t: s.type)(using overr
         }
       }
 
-      UsedConstruct.values.foldLeft(SummaryData())(_ ++ buildForConstruct(_))
+      UsedConstruct.values.foldLeft(SummaryData())(_ ++ buildForConstruct(_)) ++ SummaryData(trusted = trusted)
     }
 
     override def initEnv: Env = {
@@ -160,6 +180,9 @@ class ConstructsUsage(override val s: Trees)(override val t: s.type)(using overr
       val env = initEnv
       if (isExternNonAccessor(fd)) {
         addUsedConstruct(UsedConstruct.Extern, env)
+        val owner = fd.flags.collectFirst { case IsMethodOf(cid) => cid }
+        val kind = if (owner.isDefined) TrustedKind.Method else TrustedKind.Function
+        recordTrusted(kind, fd.id, owner, fd.getPos, fd.flags, Some(fd.fullBody))
       }
       traverse(fd.fullBody, env)
     }
@@ -169,6 +192,7 @@ class ConstructsUsage(override val s: Trees)(override val t: s.type)(using overr
       val env = initEnv
       if (cd.flags.contains(Extern)) {
         addUsedConstruct(UsedConstruct.Extern, env)
+        recordTrusted(TrustedKind.Class, cd.id, None, cd.getPos, cd.flags, None)
       }
       cd.fields.foreach(traverseField(_, env))
     }
@@ -177,6 +201,7 @@ class ConstructsUsage(override val s: Trees)(override val t: s.type)(using overr
       val newEnv = env.visitingLocalClassDef(lcd)
       if (lcd.flags.contains(Extern)) {
         addUsedConstruct(UsedConstruct.Extern, newEnv)
+        recordTrusted(TrustedKind.Class, lcd.id, None, lcd.getPos, lcd.flags, None)
       }
       lcd.fields.foreach(traverseField(_, newEnv))
       lcd.methods.foreach(traverse(_, newEnv))
@@ -186,6 +211,11 @@ class ConstructsUsage(override val s: Trees)(override val t: s.type)(using overr
       val newEnv = env.visitingLocalMethodDef(lmd)
       if (isExternNonAccessor(lmd.toFunDef)) {
         addUsedConstruct(UsedConstruct.Extern, newEnv)
+        val owner = newEnv match {
+          case Env.Method(_, cls) => Some(cls)
+          case _ => None
+        }
+        recordTrusted(TrustedKind.Method, lmd.id, owner, lmd.getPos, lmd.flags, Some(lmd.fullBody))
       }
       traverse(lmd.fullBody, newEnv)
     }
@@ -194,6 +224,7 @@ class ConstructsUsage(override val s: Trees)(override val t: s.type)(using overr
       val newEnv = env.visitingLocalFunDef(lfd)
       if (lfd.flags.contains(Extern)) {
         addUsedConstruct(UsedConstruct.Extern, newEnv)
+        recordTrusted(TrustedKind.Function, lfd.id, None, lfd.getPos, lfd.flags, Some(lfd.fullBody))
       }
       traverse(lfd.fullBody, newEnv)
     }
@@ -202,6 +233,11 @@ class ConstructsUsage(override val s: Trees)(override val t: s.type)(using overr
       val newEnv = env.visitingField(field)
       if (field.flags.contains(Extern)) {
         addUsedConstruct(UsedConstruct.Extern, newEnv)
+        val owner = newEnv match {
+          case Env.Field(_, cls) => Some(cls)
+          case _ => None
+        }
+        recordTrusted(TrustedKind.Field, field.id, owner, field.getPos, field.flags, None)
       }
     }
 
@@ -289,13 +325,25 @@ object ConstructsUsage extends ExtractionPipelineCreator {
     case Inner(id: Identifier, outerMethod: Identifier)
   }
 
+  enum TrustedKind(val description: String) {
+    case Function extends TrustedKind("function")
+    case Method extends TrustedKind("method")
+    case Class extends TrustedKind("class")
+    case Field extends TrustedKind("field")
+  }
+
+  /** A user @extern definition: its contract (if any) is assumed, not checked. */
+  case class TrustedDefinition(kind: TrustedKind, id: Identifier, owner: Option[Identifier],
+                               position: inox.utils.Position, annotations: Seq[String], contract: Seq[String])
+
   case class SummaryData(userUsage: Map[UsedConstruct, ConstructsOccurrences] = Map.empty,
-                         libUsage: Map[UsedConstruct, ConstructsOccurrences] = Map.empty) {
+                         libUsage: Map[UsedConstruct, ConstructsOccurrences] = Map.empty,
+                         trusted: Set[TrustedDefinition] = Set.empty) {
     // If an occurrence is not affected, then it should not be present in the map
     assert(userUsage.values.forall(_.isAffected))
     assert(libUsage.values.forall(_.isAffected))
     def ++(other: SummaryData): SummaryData =
-      SummaryData(merge(userUsage, other.userUsage)(_ ++ _), merge(libUsage, other.libUsage)(_ ++ _))
+      SummaryData(merge(userUsage, other.userUsage)(_ ++ _), merge(libUsage, other.libUsage)(_ ++ _), trusted ++ other.trusted)
     def hasExplicitChoose: Boolean = userUsage.contains(UsedConstruct.Choose)
     def hasMissingImpl: Boolean = userUsage.contains(UsedConstruct.NotImplemented)
     def hasExtern: Boolean = userUsage.contains(UsedConstruct.Extern)

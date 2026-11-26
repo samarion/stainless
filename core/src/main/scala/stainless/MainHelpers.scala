@@ -73,6 +73,7 @@ trait MainHelpers extends inox.MainHelpers { self =>
     optWatch -> Description(General, "Re-run stainless upon file changes"),
     optCompact -> Description(General, "Print only invalid elements of summaries"),
     optExtendedSummary -> Description(General, "Print an extended summary of all Stainless phases"),
+    optTrustedBase -> Description(General, "List the @extern definitions of the program, whose contracts are assumed"),
     frontend.optBatchedProgram -> Description(General, "Process the whole program together, skip dependency analysis"),
     frontend.optKeep -> Description(General, "Keep library objects marked by @keepFor(g) for some g in g1,g2,... (implies --batched)"),
     frontend.optExtraDeps -> Description(General, "Fetch the specified extra source dependencies and add their source files to the session"),
