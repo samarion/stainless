@@ -92,6 +92,13 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
     case _ => false
   }
 
+  /** The type of field `id` of `cd` if it is an object type that mentions no type parameter of `cd`: the
+   *  type test of `cd` skips it, so it is tested where it is selected. */
+  private def fixedFieldTest(cd: s.ClassDef, id: Identifier)(using scope: Scope): Option[s.Type] =
+    cd.fields.find(_.id == id).map(_.tpe).filter { tpe =>
+      !s.typeOps.typeParamsOf(tpe).exists(cd.typeArgs.contains) && !isSimple(tpe)
+    }
+
   private def isSimple(tpe: s.Type)(using Scope): Boolean = !s.typeOps.exists(isObject)(tpe)
 
 
@@ -1153,8 +1160,20 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
         }).copiedFrom(e)
 
       case s.ClassSelector(expr, id) =>
-        val field = erased(expr.getType).asInstanceOf[s.ClassType].tcd.fields.find(_.id == id).get
-        convert(t.ADTSelector(transform(expr), id).copiedFrom(e), field.getType, inType)
+        val ct = erased(expr.getType).asInstanceOf[s.ClassType]
+        val field = ct.tcd.fields.find(_.id == id).get
+        val selected = convert(t.ADTSelector(transform(expr), id).copiedFrom(e), field.getType, inType)
+        // The fields of `Object` aren't refined by their type tests (see `refSort`). The type test of a class
+        // covers the fields whose types mention its type parameters, and the others are typed where they are
+        // selected, so that only the selections in the program unroll their type tests.
+        fixedFieldTest(ct.tcd.cd, id) match {
+          case Some(fieldTpe) if isObject(inType) =>
+            val vd = t.ValDef.fresh("f", transform(inType)).copiedFrom(e)
+            t.Let(vd, selected, t.Assume(
+              instanceOf(vd.toVariable, s.AnyType().copiedFrom(e), fieldTpe).copiedFrom(e), vd.toVariable
+            ).copiedFrom(e)).copiedFrom(e)
+          case _ => selected
+        }
 
       case s.IsInstanceOf(expr, tpe) =>
         instanceOf(transform(expr), expr.getType, tpe).copiedFrom(e)
@@ -1616,7 +1635,16 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
     val refSort = new t.ADTSort(refID, Seq(),
       symbols.classes.values.toSeq.filterNot(_.flags contains s.IsAbstract).map { cd =>
         val anys = cd.typeArgs.map(tp => s.AnyType().copiedFrom(tp))
-        val fields = cd.typed(anys).fields.map(emptyScope.transform)
+        // The fields of `Object` aren't refined by their type tests, since these refinements are unrolled for
+        // every `Object` value. The type test of the class covers the fields whose types mention its type
+        // parameters, and the others are tested where they are selected (see `fixedFieldTest`).
+        val fields = cd.typed(anys).fields.map(emptyScope.transform).map { vd =>
+          vd.tpe match {
+            case t.RefinementType(v, t.Annotated(_, Seq(t.DropConjunct))) if v.tpe == ref =>
+              vd.copy(tpe = ref).copiedFrom(vd)
+            case _ => vd
+          }
+        }
         new t.ADTConstructor(cd.id, refID, fields).copiedFrom(cd)
       } ++ symbols.sorts.values.toSeq.map { sort =>
         new t.ADTConstructor(adt(sort.id), refID, Seq(t.ValDef(
