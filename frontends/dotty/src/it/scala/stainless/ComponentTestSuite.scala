@@ -73,33 +73,54 @@ trait ComponentTestSuite extends inox.TestSuite with inox.ResourceUtils with Inp
     } {
       test(s"$dir/$name", ctx => filter(ctx, s"$dir/$name")) { testCtx ?=>
         given ctx: inox.Context = testCtx.withOpts(options(s"$dir/$name")*)
-        val defs = (unit.allFunctions(using lp.programSymbols).toSet ++ unit.allClasses).filter(identifierFilter)
-
-        val deps = defs.flatMap(id => lp.programSymbols.dependencies(id) + id)
-        val symbols = extraction.xlang.trees.NoSymbols
-          .withClasses(lp.programSymbols.classes.values.filter(cd => deps(cd.id)).toSeq)
-          .withFunctions(lp.programSymbols.functions.values.filter(fd => deps(fd.id)).toSeq)
-          .withTypeDefs(lp.programSymbols.typeDefs.values.filter(td => deps(td.id)).toSeq)
-
-        val run = component.run(extraction.pipeline)
-        val exSymbols = run.extract(symbols)._1
-        exSymbols.ensureWellFormed
-        assert(ctx.reporter.errorCount == 0, "There were errors during pipeline extraction")
-
-        val funs = inox.utils.fixpoint { (defs: Set[Identifier]) =>
-          def derived(flags: Seq[run.trees.Flag]): Boolean =
-            (defs & flags.collect { case run.trees.Derived(Some(id)) => id }.toSet).nonEmpty ||
-              flags.contains(run.trees.Derived(None))
-
-          defs ++
-            exSymbols.functions.values.filter(fd => derived(fd.flags)).map(_.id) ++
-            exSymbols.sorts.values.filter(sort => derived(sort.flags)).map(_.id)
-        }(defs).toSeq.filter(exSymbols.functions.contains)
-
-        val report = Await.result(run.execute(funs, exSymbols, ExtractionSummary.NoSummary), Duration.Inf)
+        val transcript = Option.when(ComponentTestSuite.checksDeterminism(ctx.options))(new inox.solvers.smtlib.SMTTranscript)
+        val report = analyze(lp, unit, identifierFilter)(using ctx.withOpts(inox.solvers.smtlib.optSMTTranscript(transcript)))
         block(report, ctx.reporter, unit, file)
+
+        // The test runs again without solving anything, the solvers answering from the transcript of the
+        // first run, after other identifiers have been created, as when other tests run first. Its solvers
+        // must send the same commands.
+        for (t <- transcript) {
+          (1 to ComponentTestSuite.identifierShift).foreach(_ => inox.FreshIdentifier("shift"))
+          t.replay()
+          val replayCtx = stainless.TestContext(ctx.options).withOpts(inox.solvers.smtlib.optSMTTranscript(transcript))
+          analyze(lp, unit, identifierFilter)(using replayCtx)
+          val mismatches = t.mismatches
+          assert(mismatches.isEmpty && t.unreplayed == 0,
+            s"The solver queries depend on the order of identifiers: a second run, after other identifiers were " +
+            s"created, sent different commands (${mismatches.size} of ${t.sessions} sessions differ, " +
+            s"${t.unreplayed} recorded sessions weren't replayed)" + mismatches.headOption.map(":\n" + _).getOrElse(""))
+        }
       }
     }
+  }
+
+  private def analyze(lp: LoadedPrograms, unit: xt.UnitDef, identifierFilter: Identifier => Boolean)
+                     (using ctx: inox.Context): component.Analysis = {
+    val defs = (unit.allFunctions(using lp.programSymbols).toSet ++ unit.allClasses).filter(identifierFilter)
+
+    val deps = defs.flatMap(id => lp.programSymbols.dependencies(id) + id)
+    val symbols = extraction.xlang.trees.NoSymbols
+      .withClasses(lp.programSymbols.classes.values.filter(cd => deps(cd.id)).toSeq)
+      .withFunctions(lp.programSymbols.functions.values.filter(fd => deps(fd.id)).toSeq)
+      .withTypeDefs(lp.programSymbols.typeDefs.values.filter(td => deps(td.id)).toSeq)
+
+    val run = component.run(extraction.pipeline)
+    val exSymbols = run.extract(symbols)._1
+    exSymbols.ensureWellFormed
+    assert(ctx.reporter.errorCount == 0, "There were errors during pipeline extraction")
+
+    val funs = inox.utils.fixpoint { (defs: Set[Identifier]) =>
+      def derived(flags: Seq[run.trees.Flag]): Boolean =
+        (defs & flags.collect { case run.trees.Derived(Some(id)) => id }.toSet).nonEmpty ||
+          flags.contains(run.trees.Derived(None))
+
+      defs ++
+        exSymbols.functions.values.filter(fd => derived(fd.flags)).map(_.id) ++
+        exSymbols.sorts.values.filter(sort => derived(sort.flags)).map(_.id)
+    }(defs).toSeq.sorted.filter(exSymbols.functions.contains)
+
+    Await.result(run.execute(funs, exSymbols, ExtractionSummary.NoSummary), Duration.Inf)
   }
 }
 object ComponentTestSuite extends inox.ResourceUtils with InputUtils {
@@ -107,6 +128,16 @@ object ComponentTestSuite extends inox.ResourceUtils with InputUtils {
     * Inox rejects such comparisons by default.
     */
   val comparesFunctions: Set[String] = Set("Countable", "Countable2", "Berardi1", "Berardi2", "Berardi3", "Berardi4")
+
+  /** Whether a test runs twice to check that its solver queries don't depend on the numbering of identifiers
+    * (`-Ddeterminism-check=true`), which only SMT-LIB solvers can replay without solving.
+    */
+  def checksDeterminism(options: inox.Options): Boolean =
+    sys.props.get("determinism-check").contains("true") &&
+      options.findOptionOrDefault(inox.optSelectedSolvers).forall(_.startsWith("smt-"))
+
+  /** The number of identifiers created between the two runs of a determinism check. */
+  val identifierShift: Int = 7919
 
   case class LoadedPrograms(unitsWithFile: Seq[(xt.UnitDef, File)], programSymbols: xt.Symbols)
   case class LoadedProgramsWithResource[R](lp: LoadedPrograms, resource: R)
