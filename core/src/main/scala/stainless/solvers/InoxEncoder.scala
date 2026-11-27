@@ -109,6 +109,26 @@ private class TreeEncoder[Prog <: Program](val sourceProgram: Prog)
         fd.flags.map(transform)
       ).copiedFrom(fd)
 
+    // The postcondition is the refinement of the return type, which the solver assumes of each call
+    // as soon as it meets it, without unfolding its body (see `inox.solvers.unrolling.FunctionTemplates`).
+    // The precondition of every call is checked (the solver runs under `optAssumeChecked`), so the
+    // postcondition holds of every call, as it did when it was assumed in the body. The precondition
+    // is still assumed in the body.
+    case ens @ s.Ensuring(body, s.Lambda(Seq(res), post)) =>
+      val (pre, inner) = body match {
+        case s.Require(pre, inner) => (Some(transform(pre)), inner)
+        case _ => (None, body)
+      }
+      val postWithAssumes = s.exprOps.postMap {
+        case as @ s.Assert(pred, _, body) => Some(s.Assume(pred, body).copiedFrom(as))
+        case _ => None
+      } (post)
+      val refinement = t.RefinementType(transform(res), transform(postWithAssumes)).copiedFrom(ens)
+      val newBody = pre.fold(transform(inner))(p => t.Assume(p, transform(inner)).copiedFrom(ens))
+      new t.FunDef(
+        transform(fd.id), fd.tparams.map(transform), fd.params.map(transform), refinement, newBody, fd.flags.map(transform)
+      ).copiedFrom(fd)
+
     case _ => super.transform(fd)
   }
 
