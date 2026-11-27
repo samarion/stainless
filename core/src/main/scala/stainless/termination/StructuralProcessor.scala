@@ -5,11 +5,12 @@ package termination
 
 import scala.annotation.tailrec
 
-/** Finds structural measures: a parameter of each function of the problem, all of the same sort, such
- *  that every call between these functions passes a subterm of the caller's parameter as the callee's
- *  (see [[SubtermOrder]]). These measures are checked by the subterm order instead of the size of the
- *  sort. A single function whose recursive calls pass subtrees of a parameter otherwise gets the size of
- *  this parameter as measure. */
+/** Finds structural measures: parameters of each function of the problem, of the same sorts for all
+ *  functions, that decrease lexicographically by the subterm order (see [[SubtermOrder]]) in every call
+ *  between these functions: the callee's parameter is a subterm of the caller's for some component, and
+ *  the same value for the components before it. These measures are the parameters themselves, which the
+ *  type checker compares by the subterm order instead of the size of their sort. A single function whose
+ *  recursive calls pass subtrees of a parameter otherwise gets the size of this parameter as measure. */
 class StructuralProcessor(override val checker: ProcessingPipeline)
                          // Alias for checker, as we cannot use it to define ordering
                          (override val chker: checker.type)
@@ -122,7 +123,10 @@ class StructuralProcessor(override val checker: ProcessingPipeline)
       None
     } else if (calls.isEmpty) {
       cleared(fds.map(_ -> None).toMap)
-    } else structuralMeasures(fds, calls) match {
+    } else (
+      // The measures of a problem must have the same type, so a measure given by the user rules them out
+      if (fds.exists(_.measure.isDefined)) None else structuralMeasures(fds, calls)
+    ) match {
       case Some(measures) =>
         cleared(measures.view.mapValues(params => Some(tupleWrap(params))).toMap)
 
