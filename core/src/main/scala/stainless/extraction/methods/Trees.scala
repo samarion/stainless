@@ -25,6 +25,18 @@ trait Trees extends throwing.Trees { self =>
     def getTpe(stripRefinements: Boolean)(using Symbols): Type = ct.getTpe(stripRefinements)
   }
 
+  // Field types may refer to `this`, as in `{ x: C | x.outer eq this.outer }` (see `xlang.MemberClasses`)
+  override protected def fieldType(expr: Expr, ct: ClassType, vd: ValDef)(using Symbols): Type = {
+    val tpe = super.fieldType(expr, ct, vd)
+    if (!typeOps.exists { case RefinementType(_, pred) => exprOps.exists { case _: This => true case _ => false } (pred) case _ => false } (tpe)) tpe
+    else new ConcreteSelfTreeTransformer {
+      override def transform(e: Expr): Expr = e match {
+        case _: This => expr
+        case _ => super.transform(e)
+      }
+    }.transform(tpe)
+  }
+
   /** $encodingof `super` */
   case class Super(ct: ClassType) extends Expr with Terminal {
     def getTpe(stripRefinements: Boolean)(using Symbols): Type = ct.getTpe(stripRefinements)
@@ -141,28 +153,6 @@ trait Trees extends throwing.Trees { self =>
             val _ = subs.toList // force visit to children
             ()
         }(fd.fullBody)
-      }
-
-      // Check that abstract methods are overridden by a method, a lazy val, or a constructor parameter (but not by a val)
-      if (!cd.isAbstract) {
-        val remainingAbstract = (cd +: cd.ancestors.map(_.cd)).reverse.foldLeft(Set.empty[Symbol]) {
-          case (abstractSymbols, acd) =>
-            val concreteSymbols = acd.methods
-              .map(id => id.symbol -> getFunction(id))
-              .filter { case (_, fd) => !fd.isAbstract }
-              // fd.getFieldDefPosition is empty for lazy val's, non-empty for val's
-              .filter { case (_, fd) =>
-                (!fd.isAccessor || fd.isAccessorOfParam(acd)) && fd.getFieldDefPosition.isEmpty
-              }
-              .map(_._1).toSet
-            val newAbstractSymbols = acd.methods.filter(id => getFunction(id).isAbstract).map(_.symbol).toSet
-            abstractSymbols -- concreteSymbols ++ newAbstractSymbols
-        }
-
-        if (remainingAbstract.nonEmpty) {
-          throw NotWellFormedException(cd,
-            Some("abstract methods " + remainingAbstract.map(_.name).toList.sorted.mkString(", ") + " were not overridden by a method, a lazy val, or a constructor parameter"))
-        }
       }
 
       val ancestors = cd.ancestors(using this).map(cd => cd.id -> cd).toMap
