@@ -143,10 +143,10 @@ object TerminationChecker {
         val checker: self.type
       } = new BVOrderingImpl(self, sze, self.cfa, encoderImpl)
 
-      class RecursionProcessorImpl(override val checker: self.type,
+      class StructuralProcessorImpl(override val checker: self.type,
                                    override val ordering: integerOrdering.type)
-        extends RecursionProcessor(checker, ordering)
-      val recursionProcessor = new RecursionProcessorImpl(self, integerOrdering)
+        extends StructuralProcessor(checker, ordering)
+      val structuralProcessor = new StructuralProcessorImpl(self, integerOrdering)
 
       class DecreasesProcessorImpl(override val checker: self.type, override val ordering: integerOrdering.type)
         extends DecreasesProcessor(checker, ordering)
@@ -178,7 +178,7 @@ object TerminationChecker {
 
       val processors = {
         List(
-          recursionProcessor,
+          structuralProcessor,
           selfCallsProcessor,
           decreasesProcessor,
           integerProcessor,
