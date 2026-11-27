@@ -49,29 +49,7 @@ class MeasureInference(override val s: Trees, override val t: Trees)(using overr
     val transformer = new TransformerImpl(self.s, self.t)
 
     class TransformerImpl(override val s: self.s.type, override val t: self.t.type)
-      extends inox.transformers.ConcreteTreeTransformer(s, t) {
-
-      override def transform(e: s.Expr): t.Expr = e match {
-        case Decreases(v: Variable, body) if v.getType.isInstanceOf[ADTType] =>
-          t.Decreases(transform(size(v)), transform(body)).setPos(e)
-
-        case Decreases(tup @ Tuple(ts), body) =>
-          t.Decreases(t.Tuple(ts.map {
-            case v: Variable if v.getType.isInstanceOf[ADTType] => transform(size(v))
-            case e => transform(e)
-          }).copiedFrom(tup), transform(body)).setPos(e)
-
-        case _ =>
-          super.transform(e)
-      }
-
-      private def size(v: Variable): Expr = {
-        require(v.getType.isInstanceOf[ADTType])
-        // The type arguments keep their refinements, as the size function must accept `v`
-        val ADTType(id, tps) = symbols.unrefined(v.tpe): @unchecked
-        FunctionInvocation(sizes.fullSizeId(symbols.sorts(id)), tps, Seq(v)).setPos(v)
-      }
-    }
+      extends inox.transformers.ConcreteTreeTransformer(s, t)
 
     def needsMeasure(fd: FunDef): Boolean = symbols.isRecursive(fd.id) && {
       val specced = exprOps.BodyWithSpecs(fd.fullBody)

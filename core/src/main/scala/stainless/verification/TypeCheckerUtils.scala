@@ -230,6 +230,8 @@ object TypeCheckerUtils {
     case BVType(signed, size) => GreaterEquals(e, BVLiteral(signed, 0, size))
     case TupleType(tps) => and((1 to tps.length).map(i => positive(tps(i-1), TupleSelect(e,i)))*)
     case RefinementType(vd, ref) => positive(vd.tpe, e)
+    // Values of a sort are ordered by the subterm relation, which is well-founded
+    case ADTType(_, _) => BooleanLiteral(true)
     case _ =>
       ctx.reporter.fatalError(e.getPos, s"Type ${tpe.asString} is not supported for measures")
   }).setPos(e)
