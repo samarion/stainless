@@ -1614,7 +1614,7 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
     }
 
     val refSort = new t.ADTSort(refID, Seq(),
-      symbols.classes.values.toSeq.filterNot(_.flags contains s.IsAbstract).map { cd =>
+      symbols.classes.values.toSeq.sortBy(_.id).filterNot(_.flags contains s.IsAbstract).map { cd =>
         val anys = cd.typeArgs.map(tp => s.AnyType().copiedFrom(tp))
         // Fields whose types mention type parameters of the class aren't refined by their type tests: the type
         // test of the class already covers them, and refinements of `Object` fields are unrolled for every
@@ -1628,7 +1628,7 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
           }
         }
         new t.ADTConstructor(cd.id, refID, fields).copiedFrom(cd)
-      } ++ symbols.sorts.values.toSeq.map { sort =>
+      } ++ symbols.sorts.values.toSeq.sortBy(_.id).map { sort =>
         new t.ADTConstructor(adt(sort.id), refID, Seq(t.ValDef(
           adtValue(sort.id),
           t.ADTType(sort.id, sort.typeArgs.map(tp => ref.copiedFrom(tp))).copiedFrom(sort)
