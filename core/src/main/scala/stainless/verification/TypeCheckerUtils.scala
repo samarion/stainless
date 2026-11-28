@@ -230,12 +230,20 @@ object TypeCheckerUtils {
     case BVType(signed, size) => GreaterEquals(e, BVLiteral(signed, 0, size))
     case TupleType(tps) => and((1 to tps.length).map(i => positive(tps(i-1), TupleSelect(e,i)))*)
     case RefinementType(vd, ref) => positive(vd.tpe, e)
+    // Values of a sort are ordered by the subterm relation, which is well-founded
+    case ADTType(_, _) => BooleanLiteral(true)
     case _ =>
       ctx.reporter.fatalError(e.getPos, s"Type ${tpe.asString} is not supported for measures")
   }).setPos(e)
 
   case class Substituter(subst: Map[Identifier, Identifier]) extends ConcreteStainlessSelfTreeTransformer {
     override def transform(id: Identifier) = subst.getOrElse(id, id)
+    // Field types may refer to the previous fields (see `xlang.MemberClasses`), whose identifiers are also
+    // those of the selectors, which stay the same
+    override def transform(e: Expr): Expr = e match {
+      case ADTSelector(expr, selector) => ADTSelector(transform(expr), selector).copiedFrom(e)
+      case _ => super.transform(e)
+    }
     def transformTp(tp: TypeParameter): TypeParameter = transform(tp).asInstanceOf[TypeParameter]
     def enrich(id1: Identifier, id2: Identifier): Substituter = {
       require(!subst.contains(id1))

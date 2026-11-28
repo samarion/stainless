@@ -30,15 +30,24 @@ trait Trees extends innerfuns.Trees with Definitions { self =>
     protected def computeTpe(stripRefinements: Boolean)(using s: Symbols): Type = expr.getTpe(stripRefinements).stripToplevelRefinement match {
       case ct: ClassType =>
         val memberSubst = memberTypeSubst(expr)
-        field.map(vd => typeOps.instantiateType(vd.tpe, memberSubst)).orElse((s.lookupFunction(selector), s.lookupClass(ct.id, ct.tps)) match {
+        field.map(vd => typeOps.instantiateType(fieldType(expr, ct, vd), memberSubst)).orElse((s.lookupFunction(selector), s.lookupClass(ct.id, ct.tps)) match {
           case (Some(fd), Some(tcd)) =>
             Some(typeOps.instantiateType(fd.returnType, memberSubst ++ (tcd.cd.tparams.map(_.tp) zip tcd.tps).toMap))
           case _ =>
             None
-        }).getOrElse(Untyped)
+        }).map(_.getTpe(stripRefinements)).getOrElse(Untyped)
       case tp =>
         Untyped
     }
+  }
+
+  /** The type of the field `vd` of `ct` as seen from `expr`: field types may refer to the previous fields (see
+    * `xlang.MemberClasses`), and to `this` before `MethodLifting` (see `methods.Trees`).
+    */
+  protected def fieldType(expr: Expr, ct: ClassType, vd: ValDef)(using s: Symbols): Type = {
+    val fields = ct.lookupClass.toSeq.flatMap(_.fields).takeWhile(_.id != vd.id)
+    if (fields.isEmpty) vd.tpe
+    else typeOps.replaceFromSymbols(fields.map(f => f -> (ClassSelector(expr, f.id).copiedFrom(expr): Expr)).toMap, vd.tpe)
   }
 
   /** $encodingof `expr.isInstanceOf[tpe]` */
@@ -494,6 +503,7 @@ trait TreeDeconstructor extends innerfuns.TreeDeconstructor {
     case s.IsInvariant => (Seq(), Seq(), Seq(), (_, _, _) => t.IsInvariant)
     case s.IsAbstract => (Seq(), Seq(), Seq() ,(_, _, _) => t.IsAbstract)
     case s.IsSealed => (Seq(), Seq(), Seq(), (_, _, _) => t.IsSealed)
+    case s.IsOpen => (Seq(), Seq(), Seq(), (_, _, _) => t.IsOpen)
     case s.Bounds(lo, hi) => (Seq(), Seq(), Seq(lo, hi), (_, _, tps) => t.Bounds(tps(0), tps(1)))
     case s.Variance(v) => (Seq(), Seq(), Seq(), (_, _, _) => t.Variance(v))
     case s.IsTypeMemberOf(id) => (Seq(id), Seq(), Seq(), (ids, _, _) => t.IsTypeMemberOf(ids(0)))
