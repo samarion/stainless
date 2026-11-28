@@ -44,11 +44,10 @@ trait SubtermOrder { self =>
    *  that make it a strict subterm of `current`.
    *
    *  Only fields declared with the type of the sort itself, or within tuples, lead to subterms, although
-   *  the subterm order on all values is well-founded. Measures that aren't subterms of one another are
-   *  compared by the size of their sort, which doesn't count the other fields (as fields whose type is a
-   *  type parameter), and a call that decreases by either order could otherwise increase by the other one.
-   *  Through these fields, a subterm is also smaller by size, so that the union of both orders is the size
-   *  order.
+   *  the subterm order on all values is well-founded. Measure inference replaces by their size the
+   *  measures that some call doesn't pass a subterm of, and the size of a sort doesn't count the other
+   *  fields (as fields whose type is a type parameter). Through these fields, a subterm is also smaller by
+   *  size, so that the measures of ADT type that stay values could also be replaced by their size.
    *
    *  The variables bound in `bindings` (by the path, as scrutinees or parameters of inlined functions) are
    *  replaced by their values. With `otherRoots`, the selections may start from another variable, which

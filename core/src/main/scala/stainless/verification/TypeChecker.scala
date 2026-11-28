@@ -276,13 +276,10 @@ class TypeChecker(val program: StainlessProgram, val context: inox.Context, val 
    * ==================================== */
 
 
-  /** The size function of each sort, introduced by measure inference */
-  private lazy val sizeFunctions: Map[Identifier, Identifier] =
-    functions.values.flatMap(fd => fd.flags.collectFirst { case SizeOf(sort) => sort -> fd.id }).toMap
-
   /** The condition under which the measure `callee` of a call is smaller than the current measure, with
-   *  the values that the path binds to variables. Values of a sort are compared by the subterm order when
-   *  `callee` is selected from `current` (see [[termination.SubtermOrder]]), and by their size otherwise. */
+   *  the values that the path binds to variables. Values of a sort are compared by the subterm order (see
+   *  [[termination.SubtermOrder]]): measure inference replaces by their size the measures of ADT type that
+   *  some call doesn't pass a subterm of. */
   private def decreases(tpe: Type, callee: Expr, current: Expr, bindings: Map[Variable, Expr]): Expr = (tpe match {
     case RefinementType(vd, _) => decreases(vd.tpe, callee, current, bindings)
     case TupleType(tps) =>
@@ -293,11 +290,7 @@ class TypeChecker(val program: StainlessProgram, val context: inox.Context, val 
     // A value doesn't decrease when it is passed unchanged, as the earlier components of lexicographic measures
     case _: ADTType if subterms.inlined(callee, bindings) == subterms.inlined(current, bindings) => BooleanLiteral(false)
     case adt: ADTType =>
-      subterms.subterm(adt, callee, current, bindings, otherRoots = true).getOrElse {
-        val sizeId = sizeFunctions.getOrElse(adt.id,
-          context.reporter.fatalError(current.getPos, s"No size function for measures of type ${adt.asString}"))
-        LessThan(FunctionInvocation(sizeId, adt.tps, Seq(callee)), FunctionInvocation(sizeId, adt.tps, Seq(current)))
-      }
+      subterms.subterm(adt, callee, current, bindings, otherRoots = true).getOrElse(BooleanLiteral(false))
     case _ => lessThan(tpe, callee, current)
   }).setPos(callee)
 

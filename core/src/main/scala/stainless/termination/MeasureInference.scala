@@ -51,6 +51,68 @@ class MeasureInference(override val s: Trees, override val t: Trees)(using overr
     class TransformerImpl(override val s: self.s.type, override val t: self.t.type)
       extends inox.transformers.ConcreteTreeTransformer(s, t)
 
+    private val subterms = SubtermOrder(s)
+
+    private def measureComponents(measure: Expr): Seq[Expr] = symbols.unrefined(measure.getType) match {
+      case TupleType(tps) => tps.indices.map(i => symbols.tupleSelect(measure, i + 1, true))
+      case _ => Seq(measure)
+    }
+
+    private def isADT(e: Expr): Boolean = symbols.unrefined(e.getType).isInstanceOf[ADTType]
+
+    // The components of the measures given by the user that stay values of ADT type, for each function
+    private val structuralComponents: MutableMap[Identifier, Set[Int]] = MutableMap.empty
+
+    /** The components of ADT type of the measure of `fd`, given by the user, which stay values that the type
+     *  checker compares by the subterm order (see [[SubtermOrder]]): every call between the functions of
+     *  the cycle of `fd` passes a subterm of the component, or the same value. The measures of a cycle must
+     *  have the same type, so all of them must be given by the user, and they keep the same components. */
+    private def keptComponents(fd: FunDef): Set[Int] = structuralComponents.getOrElse(fd.id, {
+      val cycle = symbols.functions.values.filter { g =>
+        g.id == fd.id || (symbols.transitivelyCalls(fd.id, g.id) && symbols.transitivelyCalls(g.id, fd.id))
+      }.toSeq
+      val measures = cycle.flatMap(g => exprOps.measureOf(g.fullBody).map(g.id -> _)).toMap
+      val arities = measures.values.map(measureComponents(_).size).toSet
+
+      val kept: Set[Int] = if (measures.size < cycle.size || arities.size != 1) Set.empty else {
+        val calls = cycle.flatMap { g =>
+          symbols.collectWithPC(g.fullBody) {
+            case (fi: FunctionInvocation, path) if measures.contains(fi.id) => (g, fi, path)
+          }
+        }
+
+        measureComponents(measures(fd.id)).indices.filter { j =>
+          measures.values.forall(m => isADT(measureComponents(m)(j))) && calls.forall { case (g, fi, path) =>
+            val callee = symbols.getFunction(fi.id)
+            val calleeMeasure = exprOps.replaceFromSymbols((callee.params zip fi.args).toMap, measures(fi.id))
+            val bindings = path.bindings.map { case (vd, e) => vd.toVariable -> e }.toMap
+            val (arg, current) = (measureComponents(calleeMeasure)(j), measureComponents(measures(g.id))(j))
+            val adt = symbols.unrefined(current.getType).asInstanceOf[ADTType]
+            subterms.inlined(arg, bindings) == subterms.inlined(current, bindings) ||
+              subterms.subterm(adt, arg, current, bindings, otherRoots = true).isDefined
+          }
+        }.toSet
+      }
+
+      cycle.foreach(g => structuralComponents(g.id) = kept)
+      kept
+    })
+
+    /** Replaces the components of the measure of `fd` that contain values of ADT type, and don't stay values
+     *  compared by the subterm order, by their size */
+    def lowerMeasure(fd: FunDef): FunDef = exprOps.measureOf(fd.fullBody) match {
+      case Some(measure) =>
+        val kept = keptComponents(fd)
+        val components = measureComponents(measure)
+        val lowered = components.zipWithIndex.map { case (c, j) =>
+          if (kept(j) || !typeOps.exists(_.isInstanceOf[ADTType])(c.getType)) c
+          else sizes.fullSize(c)(using symbols).setPos(c)
+        }
+        if (lowered == components) fd
+        else fd.copy(fullBody = exprOps.withMeasure(fd.fullBody, Some(tupleWrap(lowered).setPos(measure)))).copiedFrom(fd)
+      case None => fd
+    }
+
     def needsMeasure(fd: FunDef): Boolean = symbols.isRecursive(fd.id) && {
       val specced = exprOps.BodyWithSpecs(fd.fullBody)
       !specced.specs.exists(_.kind == exprOps.MeasureKind)
@@ -163,7 +225,7 @@ class MeasureInference(override val s: Trees, override val t: Trees)(using overr
       val posts = context.getPosts(fd.id)
       ((tfd, posts), ())
     } else {
-      ((context.transformer.transform(fd), MutableMap.empty), ())
+      ((context.transformer.transform(context.lowerMeasure(fd)), MutableMap.empty), ())
     }
   }
 

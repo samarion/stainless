@@ -177,7 +177,7 @@ class SizeFunctions(val trees: Trees) {
         val rhs = arguments.map(vd => fullSize(vd.toVariable)).foldLeft(base)(_ + _)
         MatchCase(ADTPattern(None, cons.id, cons.tps, argumentPatterns), None, rhs)
       }.toList), \("res" :: IntegerType())(res => res >= E(BigInt(0)))).copiedFrom(sort),
-      Seq(Synthetic, SizeOf(sort.id))
+      Seq(Synthetic)
     )
 
     functions += fd

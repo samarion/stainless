@@ -73,7 +73,6 @@ class StainlessSerializer(override val trees: ast.Trees, serializeProducts: Bool
       stainlessClassSerializer[ClassParamInit]   (170),
       stainlessClassSerializer[DropConjunct.type](171),
       stainlessClassSerializer[SplitVC.type]     (172),
-      stainlessClassSerializer[SizeOf]           (275),
 
       stainlessClassSerializer[TerminationStatus]      (161),
       stainlessClassSerializer[TR.Unknown.type]        (162),

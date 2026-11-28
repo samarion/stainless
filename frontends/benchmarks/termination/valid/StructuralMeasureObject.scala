@@ -29,7 +29,7 @@ object StructuralMeasureObject {
     }
   }
 
-  // The argument isn't a subterm of `e`, so the measures are compared by their size
+  // The argument isn't a subterm of `e`, so the measure is replaced by its size
   def flatten(e: Expr): BigInt = {
     decreases(e)
     e match {
