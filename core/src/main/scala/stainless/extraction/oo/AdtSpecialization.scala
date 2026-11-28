@@ -20,6 +20,7 @@ class AdtSpecialization(override val s: Trees, override val t: Trees)
   private def isCandidate(id: Identifier)(using symbols: s.Symbols): Boolean = {
     import s._
     val cd = symbols.getClass(id)
+    def placeholders = symbols.classes.values.count(_.flags contains IsPlaceholder)
 
     cd.parents match {
       case Nil =>
@@ -27,6 +28,8 @@ class AdtSpecialization(override val s: Trees, override val t: Trees)
           val cs = cd.children
           (cd.parents.size <= 1) &&
           (cd.typeMembers.isEmpty) &&
+          // An unknown subclass may extend other open classes, which sorts can't express (see `TypeEncoding`)
+          !((cd.flags contains IsPlaceholder) && placeholders > 1) &&
           (cs forall rec) &&
           (cd.parents forall (_.tps == cd.typeArgs)) &&
           ((cd.flags contains IsAbstract) || cs.isEmpty) &&
@@ -165,7 +168,7 @@ class AdtSpecialization(override val s: Trees, override val t: Trees)
   }
 
   private def keepSortFlag(flag: s.Flag): Boolean = flag match {
-    case s.IsAbstract | s.IsSealed | s.IsOpen | s.IsCaseObject | s.IsExtensible => false
+    case s.IsAbstract | s.IsSealed | s.IsOpen | s.IsPlaceholder | s.IsCaseObject | s.IsExtensible => false
     case _ => true
   }
 

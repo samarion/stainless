@@ -200,7 +200,10 @@ class Sealing(override val s: Trees)(override val t: s.type)
           typeArgs.map(tp => TypeParameterDef(tp).copiedFrom(tp)),
           Seq(ClassType(cd.id, typeArgs).setPos(cd)), // parent is `cd`
           Seq(dummyField) ++ fields, // we add fields for the accessors
-          (cd.flags.filterNot(_ == IsAbstract) :+ Synthetic).distinct
+          (cd.flags.filterNot(_ == IsAbstract) ++ Seq(Synthetic) ++
+            // Without accessors or mutable state, its values are the unknown objects of `oo.TypeEncoding`,
+            // which may also extend other open classes
+            (if (context.isMutable(cd) || fields.nonEmpty) Seq() else Seq(IsPlaceholder))).distinct
         ).setPos(cd)
       }
 

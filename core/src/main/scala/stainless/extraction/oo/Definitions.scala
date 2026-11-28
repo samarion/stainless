@@ -353,6 +353,10 @@ trait Definitions extends innerfuns.Trees { self: Trees =>
   /** An abstract class that [[methods.Sealing]] sealed by adding a subclass for the subclasses unknown to the
    *  program, as its subclasses aren't all known. */
   case object IsOpen extends Flag("open", Seq.empty)
+  /** The subclass that [[methods.Sealing]] adds to an open class for its unknown subclasses, when it has no
+   *  state but its `__x` field: its values are identified by `__x`, so that [[TypeEncoding]] can let an unknown
+   *  object extend several open classes. */
+  case object IsPlaceholder extends Flag("placeholder", Seq.empty)
   case object IsCaseObject extends Flag("caseObject", Seq.empty)
   case class Bounds(lo: Type, hi: Type) extends Flag("bounds", Seq(lo, hi))
   case class Variance(variance: Boolean) extends Flag("variance", Seq.empty)

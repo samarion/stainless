@@ -115,6 +115,64 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
     case _ => lambda
   }
 
+  /* The subclasses of open classes that the program doesn't know (see `methods.Sealing`) are unknown objects:
+   * `Open` in `Object`, and `Ext` in the sort of a hierarchy. The same unknown object may extend several open
+   * classes, even of different hierarchies, as it tells by a field for each placeholder (the subclasses that
+   * `Sealing` adds, flagged `IsPlaceholder`) whether it is one of its members, which it keeps when it moves
+   * from a sort to another. (An uninterpreted membership function of its number would do, but Inox would then
+   * see the type tests that call it quantify, see `inox.ast.Definitions.ensureStratifiedInvariant`.) */
+  private val hierarchyExt = new CachedID[Identifier](id => FreshIdentifier(id.name + "Ext"))
+  private val hierarchyExtValue = new CachedID[Identifier](_ => FreshIdentifier("id"))
+  private val hierarchyInvID = new CachedID[Identifier](id => FreshIdentifier(id.name + "Inv"))
+  private val hierarchyKnownID = new CachedID[Identifier](id => FreshIdentifier("is" + id.name + "Known"))
+  // The membership field of placeholder `_2` in the unknown objects of the sort of hierarchy `_1` (or `Object`)
+  private val memberField = new CachedID[(Identifier, Identifier)](p => FreshIdentifier("is" + p._2.name))
+
+  private def isPlaceholder(id: Identifier)(using symbols: s.Symbols): Boolean =
+    symbols.getClass(id).flags contains s.IsPlaceholder
+
+  /** The constructor, number field and type of the unknown objects of hierarchy `root`, or of `Object`. */
+  private def unknowns(root: Option[Identifier]): (Identifier, Identifier, t.Type) = root match {
+    case Some(root) => (hierarchyExt(root), hierarchyExtValue(root), hierarchy(root))
+    case None => (open, openValue, ref)
+  }
+
+  /** The fields of the unknown objects of hierarchy `root`, or of `Object`. */
+  private def unknownFields(root: Option[Identifier])(using context: TransformerContext): Seq[t.ValDef] =
+    t.ValDef(unknowns(root)._2, t.IntegerType()) +:
+      context.placeholders.map(cd => t.ValDef(memberField(root.getOrElse(open) -> cd.id), t.BooleanType()))
+
+  private def selectField(e: t.Expr, tpe: t.Type, id: Identifier): t.Expr = e match {
+    case v: t.Variable => t.Annotated(e.getField(id).copiedFrom(e), Seq(DropVCs)).copiedFrom(e)
+    case _ => let(("x" :: tpe.copiedFrom(e)).copiedFrom(e), e) { x =>
+      t.Annotated(x.getField(id).copiedFrom(e), Seq(DropVCs)).copiedFrom(e)
+    }.copiedFrom(e)
+  }
+
+  /** The unknown object `e` of the sort of `from` (a hierarchy, or `Object`), as one of the sort of `to`. */
+  private def moveUnknown(e: t.Expr, from: Option[Identifier], to: Option[Identifier])
+                         (using context: TransformerContext): t.Expr = {
+    val tpe = unknowns(from)._3
+    let(("x" :: tpe.copiedFrom(e)).copiedFrom(e), e) { x =>
+      t.ADT(unknowns(to)._1, Seq(), unknownFields(from).map(vd => selectField(x, tpe, vd.id))).copiedFrom(e)
+    }
+  }
+
+  /** Whether `e`, a value of the sort of placeholder `id`, is an unknown object that is a member of `id`. */
+  private def placeholderTest(e: t.Expr, id: Identifier)(using context: TransformerContext): t.Expr = {
+    val root = context.hierarchyOf(id)
+    val (cons, _, tpe) = unknowns(root)
+    (e `is` cons).copiedFrom(e) && selectField(e, tpe, memberField(root.getOrElse(open) -> id))
+  }
+
+  /** The number of `e`, a member of placeholder `id`, which is its only field `__x`. */
+  private def placeholderSelect(e: t.Expr, id: Identifier, field: Identifier)
+                               (using context: TransformerContext): t.Expr = {
+    assert(context.symbols.getClass(id).fields.map(_.id) == Seq(field))
+    val (_, number, tpe) = unknowns(context.hierarchyOf(id))
+    selectField(e, tpe, number)
+  }
+
   /* ====================================
    *      WRAPPING AND UNWRAPPING
    * ==================================== */
@@ -140,6 +198,13 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
   private def wrap(e: t.Expr, tpe: s.Type)(using scope: Scope): t.Expr = (tpe match {
     case s.AnyType() => e
     case s.ClassType(id, tps) => scope.context.hierarchyOf(id) match {
+      // Unknown objects keep their number in `Object`
+      case Some(root) if scope.context.mayBeUnknown(id) =>
+        let(("x" :: hierarchy(root)).copiedFrom(e), e) { x =>
+          t.IfExpr((x `is` hierarchyExt(root)).copiedFrom(e),
+            moveUnknown(x, Some(root), None)(using scope.context),
+            C(hierarchyBox(root))(x).copiedFrom(e)).copiedFrom(e)
+        }
       case Some(root) => C(hierarchyBox(root))(e)
       case None => e
     }
@@ -334,6 +399,12 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
   private def unwrap(e: t.Expr, tpe: s.Type)(using scope: Scope): t.Expr = (tpe match {
     case s.AnyType() => e
     case s.ClassType(id, tps) => scope.context.hierarchyOf(id) match {
+      case Some(root) if scope.context.mayBeUnknown(id) =>
+        let(("x" :: ref).copiedFrom(e), e) { x =>
+          t.IfExpr((x `is` open).copiedFrom(e),
+            moveUnknown(x, None, Some(root))(using scope.context),
+            getRefField(x, hierarchyValue(root))).copiedFrom(e)
+        }
       case Some(root) => getRefField(e, hierarchyValue(root))
       case None => e
     }
@@ -579,11 +650,17 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
         val root = scope.context.hierarchyOf(id).get
         def test(e: t.Expr) = t.FunctionInvocation(instanceID(id), Seq(), e +: tps.map(tp => typeCode(tp)))
         if (isObject(in)) {
-          (e `is` hierarchyBox(root)).copiedFrom(e) && test(getRefField(e, hierarchyValue(root)))
+          val boxed = (e `is` hierarchyBox(root)).copiedFrom(e) && test(getRefField(e, hierarchyValue(root)))
+          if (!scope.context.mayBeUnknown(id)) boxed
+          else boxed || ((e `is` open).copiedFrom(e) && test(moveUnknown(e, None, Some(root))(using scope.context)))
         } else if (hierarchyOf(in) == Some(root)) {
           test(e)
-        } else {
-          t.BooleanLiteral(false)
+        } else hierarchyOf(in) match {
+          // An unknown object of another hierarchy may also be one of this hierarchy
+          case Some(r) if scope.context.hasUnknowns(r) && scope.context.mayBeUnknown(id) =>
+            (e `is` hierarchyExt(r)).copiedFrom(e) &&
+              test(moveUnknown(e, Some(r), Some(root))(using scope.context))
+          case _ => t.BooleanLiteral(false)
         }
 
       // A class outside the hierarchy of `in`, such as a marker trait, is tested on the boxed value
@@ -777,6 +854,9 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
               t.orJoin(
                 cd.typed.children.map(ccd => instanceOf(x, cd.typed.toType, ccd.toType))
               )
+            } else if (cd.flags contains s.IsPlaceholder) {
+              placeholderTest(x, id) &&
+              t.andJoin(cd.fields.map(vd => instanceOf(placeholderSelect(x, id, vd.id), vd.tpe, vd.tpe)))
             } else {
               (x `is` cd.id) &&
               t.andJoin(cd.fields.map(vd => instanceOf(t.ADTSelector(x, vd.id), vd.tpe, vd.tpe)))
@@ -811,13 +891,17 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
       import OptionSort._
       mkFunDef(unapplyID(cd.id), t.DropVCs, t.Synthetic, t.IsUnapply(isEmpty, get))() { _ =>
         val cons = constructors(cd)
-        def condition(e: t.Expr): t.Expr = t.orJoin(cons.map(t.IsConstructor(e, _)))
+        def condition(e: t.Expr): t.Expr = t.orJoin(cons.map { c =>
+          if (isPlaceholder(c)) placeholderTest(e, c) else t.IsConstructor(e, c)
+        })
 
         val scope = context.emptyScope.in(cd.id)
         val returnType = t.tupleTypeWrap(cd.fields.map(vd => scope.transform(vd.tpe)))
         (Seq("x" :: context.encodedClass(cd.id)), T(option)(returnType), { case Seq(x) =>
           if_ (condition(x)) {
-            val r = t.tupleWrap(cd.fields.map(vd => t.ADTSelector(x, vd.id)))
+            val r = t.tupleWrap(cd.fields.map { vd =>
+              if (isPlaceholder(cd.id)) placeholderSelect(x, cd.id, vd.id) else t.ADTSelector(x, vd.id)
+            })
             C(some)(returnType)(r)
           } else_ {
             C(none)(returnType)()
@@ -1147,8 +1231,13 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
       case ct: s.ClassType if context.hierarchyOf(ct.id).isDefined =>
         val root = context.hierarchyOf(ct.id).get
         val rootType = erased(s.ClassType(root, symbols.getClass(root).typeArgs).copiedFrom(tp))
-        refinement(("x" :: hierarchy(root).copiedFrom(tp)).copiedFrom(tp)) {
-          x => t.Annotated(instanceOf(x, rootType, ct), Seq(t.DropConjunct)).copiedFrom(tp)
+        refinement(("x" :: hierarchy(root).copiedFrom(tp)).copiedFrom(tp)) { x =>
+          val test =
+            // The unknown objects of the sort that are members of none of its placeholders aren't values
+            if (context.hasUnknowns(root) && ct.id == root)
+              t.FunctionInvocation(hierarchyKnownID(root), Seq(), Seq(x)).copiedFrom(tp)
+            else instanceOf(x, rootType, ct)
+          t.Annotated(test, Seq(t.DropConjunct)).copiedFrom(tp)
         }.copiedFrom(tp)
 
       case ct: s.ClassType =>
@@ -1191,6 +1280,9 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
     }
 
     override def transform(e: s.Expr, inType: s.Type): t.Expr = e match {
+      case s.ClassConstructor(ct, args) if isPlaceholder(ct.id)(using symbols) =>
+        throw inox.FatalError(s"Unexpected construction of the placeholder ${ct.id}")
+
       case s.ClassConstructor(ct, args) =>
         convert(t.ADT(ct.id, Seq(), (erased(ct).tcd.fields zip args).map {
           case (vd, arg) => convert(transform(arg), arg.getType, vd.tpe)
@@ -1198,7 +1290,11 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
 
       case s.ClassSelector(expr, id) =>
         val field = erased(expr.getType).asInstanceOf[s.ClassType].tcd.fields.find(_.id == id).get
-        convert(t.ADTSelector(transform(expr), id).copiedFrom(e), field.getType, inType)
+        val cid = erased(expr.getType).asInstanceOf[s.ClassType].id
+        val selected =
+          if (isPlaceholder(cid)(using symbols)) placeholderSelect(transform(expr), cid, id)(using context)
+          else t.ADTSelector(transform(expr), id).copiedFrom(e)
+        convert(selected, field.getType, inType)
 
       case s.IsInstanceOf(expr, tpe) =>
         instanceOf(transform(expr), expr.getType, tpe).copiedFrom(e)
@@ -1342,6 +1438,7 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
         case cti: s.ClassType if (
           (cti +: cti.tcd.descendants.map(_.toType)).exists(isSubtypeOf(_, ct)) &&
           (!(ct.tcd.cd.flags contains s.IsAbstract) && ct.tcd.children.isEmpty) &&
+          !(ct.tcd.cd.flags contains s.IsPlaceholder) &&
           sameEncoding(cti, ct)
         ) =>
           val erasedTps = ct.tps.map(tp => if (isObject(tp)) tp else s.AnyType().copiedFrom(tp))
@@ -1738,18 +1835,80 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
 
     private val concreteClasses = symbols.classes.values.toSeq.filterNot(_.flags contains s.IsAbstract)
 
+    val placeholders = concreteClasses.filter(_.flags contains s.IsPlaceholder)
+
+    // The classes encoded by constructors of their own, as the placeholders are encoded by unknown objects
+    private val constructed = concreteClasses.filterNot(_.flags contains s.IsPlaceholder)
+
     private val hierarchyRoots: Seq[Identifier] = concreteClasses.flatMap(cd => hierarchyOf(cd.id)).distinct
+
+    private val unknownRoots: Set[Identifier] = placeholders.flatMap(cd => hierarchyOf(cd.id)).toSet
+
+    /** Whether the sort of the hierarchy of `root` has unknown objects, the members of its placeholders. */
+    def hasUnknowns(root: Identifier): Boolean = unknownRoots(root)
+
+    private val unknownClasses: Set[Identifier] =
+      placeholders.flatMap(cd => cd.ancestors(using symbols).map(_.id) :+ cd.id).toSet
+
+    /** Whether the values of class `id` may be unknown objects, the members of the placeholders it has. */
+    def mayBeUnknown(id: Identifier): Boolean = unknownClasses(id)
+
+    private def classInvariant(cd: s.ClassDef): Option[Identifier] =
+      cd.flags.collectFirst { case s.HasADTInvariant(id) => id }
+
+    private def invariantClasses(root: Identifier): Seq[s.ClassDef] =
+      symbols.classes.values.toSeq.filter(cd => hierarchyOf(cd.id) == Some(root) && classInvariant(cd).isDefined)
+
+    private def hasInvariant(root: Identifier): Boolean = invariantClasses(root).nonEmpty
+
+    /** Whether `x`, a value of the sort of the hierarchy of `root`, isn't an unknown object that is a member
+     *  of none of its placeholders. (The type of the root says so, rather than the invariant of the sort,
+     *  which costs more to some solvers.) */
+    private def knownBody(root: Identifier, x: t.Variable): t.Expr =
+      t.Implies((x `is` hierarchyExt(root)).copiedFrom(x), t.orJoin(placeholders
+        .filter(cd => hierarchyOf(cd.id) == Some(root))
+        .map(cd => selectField(x, hierarchy(root), memberField(root -> cd.id))))).copiedFrom(x)
+
+    def hierarchyKnown: Seq[t.FunDef] = hierarchyRoots.filter(hasUnknowns).map { root =>
+      val p = t.ValDef.fresh("x", hierarchy(root)).copiedFrom(symbols.getClass(root))
+      new t.FunDef(hierarchyKnownID(root), Seq(), Seq(p), t.BooleanType(), knownBody(root, p.toVariable),
+        Seq(t.Synthetic, t.DropVCs)).copiedFrom(symbols.getClass(root))
+    }
+
+    /** The invariant of the sort of the hierarchy of `root`: the invariants of the classes of its values. */
+    def hierarchyInvariants: Seq[t.FunDef] = hierarchyRoots.filter(hasInvariant).map { root =>
+      val rcd = symbols.getClass(root)
+      val x = s.ValDef.fresh("x", erased(s.ClassType(root, rcd.typeArgs).copiedFrom(rcd))).copiedFrom(rcd)
+      val body = s.andJoin(invariantClasses(root).map { cd =>
+        val ct = erased(s.ClassType(cd.id, cd.typeArgs).copiedFrom(cd))
+        val inv = symbols.getFunction(classInvariant(cd).get)
+        s.Implies(
+          s.IsInstanceOf(x.toVariable, ct).copiedFrom(cd),
+          s.FunctionInvocation(inv.id, inv.tparams.map(tp => s.AnyType().copiedFrom(tp)),
+            Seq(s.AsInstanceOf(x.toVariable, ct).copiedFrom(cd))).copiedFrom(cd)
+        ).copiedFrom(cd)
+      })
+      val p = t.ValDef.fresh("x", hierarchy(root)).copiedFrom(rcd)
+      new t.FunDef(hierarchyInvID(root), Seq(), Seq(p), t.BooleanType(),
+        t.Let(emptyScope.transform(x), p.toVariable, emptyScope.transform(body, s.BooleanType())).copiedFrom(rcd),
+        Seq(t.Synthetic, t.DropVCs)
+      ).copiedFrom(rcd)
+    }
 
     val hierarchySorts: Seq[t.ADTSort] = hierarchyRoots.map { root =>
       val rcd = symbols.getClass(root)
       new t.ADTSort(hierarchyID(root), Seq(),
-        concreteClasses.filter(cd => hierarchyOf(cd.id) == Some(root)).map(constructor(_, hierarchyID(root))),
-        Seq(t.Synthetic)
+        constructed.filter(cd => hierarchyOf(cd.id) == Some(root)).map(constructor(_, hierarchyID(root))) ++
+        (if (hasUnknowns(root))
+          Seq(new t.ADTConstructor(hierarchyExt(root), hierarchyID(root), unknownFields(Some(root))(using this)))
+        else Seq()),
+        Seq(t.Synthetic) ++
+          (if (hasInvariant(root)) Seq(t.HasADTInvariant(hierarchyInvID(root))) else Seq())
       ).copiedFrom(rcd)
     }
 
     val refSort = new t.ADTSort(refID, Seq(),
-      concreteClasses.filter(cd => hierarchyOf(cd.id).isEmpty).map(constructor(_, refID)) ++
+      constructed.filter(cd => hierarchyOf(cd.id).isEmpty).map(constructor(_, refID)) ++
       hierarchyRoots.map { root =>
         new t.ADTConstructor(hierarchyBox(root), refID, Seq(t.ValDef(hierarchyValue(root), hierarchy(root))))
       } ++ symbols.sorts.values.toSeq.map { sort =>
@@ -1776,7 +1935,7 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
         new t.ADTConstructor(bag,  refID, Seq(t.ValDef(bagValue,  t.BagType(ref)))),
         new t.ADTConstructor(map,  refID, Seq(t.ValDef(mapValue,  t.MapType(ref, ref)))),
         new t.ADTConstructor(unit, refID, Seq()),
-        new t.ADTConstructor(open, refID, Seq(t.ValDef(openValue, t.IntegerType())))
+        new t.ADTConstructor(open, refID, unknownFields(None)(using this))
       ), Seq(t.Synthetic))
 
     def transform(fd: s.FunDef): t.FunDef = emptyScope.transform(fd)
@@ -1786,7 +1945,7 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
     def functions: Seq[t.FunDef] =
       symbols.classes.keys.toSeq.flatMap(id => Seq(classInstance(id)(using this), classUnapply(id)(using this))) ++
       symbols.sorts.keys.flatMap(id => Seq(sortInstance(id)(using this), sortConvert(id)(using this))) ++
-      OptionSort.functions ++ Seq(unapplyAny(using this), box, unbox)
+      OptionSort.functions ++ hierarchyInvariants ++ hierarchyKnown ++ Seq(unapplyAny(using this), box, unbox)
 
     private def box: t.FunDef = {
       val tp = t.TypeParameter.fresh("T")
@@ -1894,9 +2053,13 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
 
     // newSymbols.ensureWellFormed
 
-    val dependencies: Set[Identifier] =
-      (symbols.functions.keySet ++ symbols.sorts.keySet)
+    val dependencies: Set[Identifier] = {
+      val deps = (symbols.functions.keySet ++ symbols.sorts.keySet).flatMap(id => newSymbols.dependencies(id) + id)
+      // The invariants of the sorts of hierarchies (see `TransformerContext.hierarchyInvariants`)
+      deps ++ newSymbols.sorts.values.filter(sort => deps(sort.id))
+        .flatMap(_.flags.collect { case t.HasADTInvariant(id) if !deps(id) => id })
         .flatMap(id => newSymbols.dependencies(id) + id)
+    }
 
     val independentSymbols = t.NoSymbols
       .withFunctions(newSymbols.functions.values.toSeq.filter(fd => dependencies(fd.id)))
