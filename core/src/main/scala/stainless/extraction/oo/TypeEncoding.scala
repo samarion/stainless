@@ -648,7 +648,7 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
 
       case (_, s.ClassType(id, tps)) if scope.context.hierarchyOf(id).isDefined =>
         val root = scope.context.hierarchyOf(id).get
-        def test(e: t.Expr) = t.FunctionInvocation(instanceID(id), Seq(), e +: tps.map(tp => typeCode(tp)))
+        def test(e: t.Expr) = instanceCall(id, e, tps.map(tp => typeCode(tp)))(using scope.context)
         if (isObject(in)) {
           val boxed = (e `is` hierarchyBox(root)).copiedFrom(e) && test(getRefField(e, hierarchyValue(root)))
           if (!scope.context.mayBeUnknown(id)) boxed
@@ -840,6 +840,43 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
   private val classInstanceCache = new ExtractionCache[s.ClassDef, t.FunDef]({
     (cd, context) => ClassKey(cd) + SetKey(cd.children(using context.symbols).toSet)
   })
+
+  // Whether the field types of a sort are being transformed, whose refinements can't select fields (they
+  // aren't checked in a function, see `verification.TypeChecker.wellFormedADT`)
+  private val inSortFields = ThreadLocal.withInitial[Boolean](() => false)
+
+  private def inFields[A](in: Boolean)(a: => A): A = {
+    val prev = inSortFields.get
+    inSortFields.set(in)
+    try a finally inSortFields.set(prev)
+  }
+
+  private def sortFields[A](a: => A): A = inFields(true)(a)
+
+  // The classes whose type tests are being built, which can't be inlined into themselves
+  private val inlining = ThreadLocal.withInitial[Set[Identifier]](() => Set.empty)
+
+  /** The type test of class `id` on `e`. The tests of the classes of hierarchy sorts without type parameters
+   *  are inlined, as the tests of ADT sorts are, which Princess needs to unfold them in time (the tests that
+   *  select fields are left as calls in the field types of sorts). */
+  private def instanceCall(id: Identifier, e: t.Expr, codes: Seq[t.Expr])
+                          (using context: TransformerContext): t.Expr = {
+    val call = t.FunctionInvocation(instanceID(id), Seq(), e +: codes).copiedFrom(e)
+    if (codes.nonEmpty || context.hierarchyOf(id).isEmpty || inlining.get.contains(id)) call
+    else {
+      val fd = {
+        inlining.set(inlining.get + id)
+        try inFields(false)(classInstance(id)) finally inlining.set(inlining.get - id)
+      }
+      if (inSortFields.get && t.exprOps.exists { case _: t.ADTSelector => true case _ => false }(fd.fullBody)) call
+      else e match {
+        case v: t.Variable => t.exprOps.replaceFromSymbols(Map(fd.params.head -> v), fd.fullBody).copiedFrom(e)
+        case _ =>
+          val vd = fd.params.head.freshen
+          t.Let(vd, e, t.exprOps.replaceFromSymbols(Map(fd.params.head -> vd.toVariable), fd.fullBody)).copiedFrom(e)
+      }
+    }
+  }
 
   private def classInstance(id: Identifier)(using context: TransformerContext): t.FunDef = {
     import context.symbols
@@ -1235,7 +1272,8 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
           val test =
             // The unknown objects of the sort that are members of none of its placeholders aren't values
             if (context.hasUnknowns(root) && ct.id == root)
-              t.FunctionInvocation(hierarchyKnownID(root), Seq(), Seq(x)).copiedFrom(tp)
+              if (inSortFields.get) t.FunctionInvocation(hierarchyKnownID(root), Seq(), Seq(x)).copiedFrom(tp)
+              else context.knownBody(root, x)
             else instanceOf(x, rootType, ct)
           t.Annotated(test, Seq(t.DropConjunct)).copiedFrom(tp)
         }.copiedFrom(tp)
@@ -1822,7 +1860,7 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
       // Fields whose types mention type parameters of the class aren't refined by their type tests: the type
       // test of the class already covers them, and refinements of the fields of a sort are unrolled for every
       // value of the sort. The type test of the class skips the other fields, which keep their refinements.
-      val fields = (cd.fields zip cd.typed(anys).fields.map(emptyScope.transform)).map { case (field, vd) =>
+      val fields = (cd.fields zip sortFields(cd.typed(anys).fields.map(emptyScope.transform))).map { case (field, vd) =>
         vd.tpe match {
           case t.RefinementType(v, t.Annotated(_, Seq(t.DropConjunct)))
               if s.typeOps.typeParamsOf(field.tpe).exists(cd.typeArgs.contains) =>
@@ -1864,7 +1902,7 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
     /** Whether `x`, a value of the sort of the hierarchy of `root`, isn't an unknown object that is a member
      *  of none of its placeholders. (The type of the root says so, rather than the invariant of the sort,
      *  which costs more to some solvers.) */
-    private def knownBody(root: Identifier, x: t.Variable): t.Expr =
+    def knownBody(root: Identifier, x: t.Variable): t.Expr =
       t.Implies((x `is` hierarchyExt(root)).copiedFrom(x), t.orJoin(placeholders
         .filter(cd => hierarchyOf(cd.id) == Some(root))
         .map(cd => selectField(x, hierarchy(root), memberField(root -> cd.id))))).copiedFrom(x)
@@ -1940,7 +1978,7 @@ class TypeEncoding(override val s: Trees, override val t: Trees)
 
     def transform(fd: s.FunDef): t.FunDef = emptyScope.transform(fd)
 
-    def transform(sort: s.ADTSort): t.ADTSort = emptyScope.transform(sort)
+    def transform(sort: s.ADTSort): t.ADTSort = sortFields(emptyScope.transform(sort))
 
     def functions: Seq[t.FunDef] =
       symbols.classes.keys.toSeq.flatMap(id => Seq(classInstance(id)(using this), classUnapply(id)(using this))) ++
