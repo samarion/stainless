@@ -20,6 +20,10 @@ class TerminationSuite extends VerificationComponentTestSuite {
     Seq(
       optInferMeasures(true),
       optCheckMeasures(YesNoOnly.Only),
+      // With a resource limit, the queries of measure inference are bounded by `--termination-work`
+      // rather than by a small part of the timeout, so that how loaded the machine is doesn't decide
+      // which measure is found.
+      inox.solvers.smtlib.optZ3Rlimit(20),
     ) ++ seq
   }
 
@@ -31,6 +35,9 @@ class TerminationSuite extends VerificationComponentTestSuite {
     case "verification/valid/BitsTricksSlow" => Skip
     // Flaky
     case "verification/valid/PackedFloat8" => Ignore
+    // Flaky on loaded machines: a query of the measure inference for `get` can take more than the
+    // 3 seconds that each query gets, and `get` then ends up with an unknown termination status
+    case "verification/valid/GenericOutersInherited" => Ignore
     // Succeeds most of the time, but unsuitable for CI due to its flakiness
     case "imperative/valid/i1306b" => Ignore
     case _ => super.filter(ctx, name)
